@@ -1,0 +1,25 @@
+version: 2
+
+updates:
+    -
+        package-ecosystem: "github-actions"
+        directory: "/"
+        schedule:
+            interval: "weekly"
+        target-branch: "dev"
+        commit-message:
+            prefix: "chore"
+            include: "scope"
+        labels:
+            - "Type: Maintenance"
+    -
+        package-ecosystem: "gomod"
+        directory: "/"
+        schedule:
+            interval: "weekly"
+        target-branch: "dev"
+        commit-message:
+            prefix: "chore"
+            include: "scope"
+        labels:
+            - "Type: Maintenance"

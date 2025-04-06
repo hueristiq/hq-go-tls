@@ -1,0 +1,43 @@
+name: 💅 Lint
+
+on:
+    push:
+        branches:
+            - "main"
+        paths:
+            - '**.go'
+            - '**.mod'
+    pull_request:
+        branches:
+          - "main"
+        paths:
+            - '**.go'
+            - '**.mod'
+    workflow_dispatch:
+    
+permissions:
+    contents: read
+
+jobs:
+    lint:
+        name: Lint
+        runs-on: ubuntu-latest
+        steps:
+            -
+                name: Set up Go
+                uses: actions/setup-go@v5
+                with:
+                    go-version:  '>=1.24'
+                    cache: false
+            -
+                name: Code Checkout
+                uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+            -
+                name: golangci-lint
+                uses: golangci/golangci-lint-action@v7
+                with:
+                    version: v2.0.2
+                    args: --timeout 5m
+                    working-directory: .

@@ -1,0 +1,45 @@
+name: 🧪 Test
+
+on:
+    push:
+        branches:
+            - "main"
+        paths:
+            - '**.go'
+            - '**.mod'
+    pull_request:
+        branches:
+          - "main"
+        paths:
+            - '**.go'
+            - '**.mod'
+    workflow_dispatch:
+
+jobs:
+    test:
+        name: Test
+        strategy:
+            matrix:
+                os: [ubuntu-latest, windows-latest, macos-latest]
+        runs-on: ${{ matrix.os }}
+        steps:
+            -
+                name: Set up Go
+                uses: actions/setup-go@v5
+                with:
+                    go-version:  '>=1.24'
+            -
+                name: Code Checkout
+                uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+            -
+                name: Go Module Management
+                run: |
+                    make go-mod-clean
+                    make go-mod-tidy
+                working-directory: .
+            -
+                name: Go test
+                run: go test -v ./...
+                working-directory: .

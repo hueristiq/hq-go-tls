@@ -1,0 +1,141 @@
+version: "2"
+linters:
+    default: none
+    enable:
+        - asasalint
+        - asciicheck
+        - bidichk
+        - bodyclose
+        - canonicalheader
+        - containedctx
+        - contextcheck
+        - copyloopvar
+        # - cyclop
+        - decorder
+        # - depguard
+        - dogsled
+        - dupl
+        # - dupword
+        - durationcheck
+        - err113
+        # - errcheck
+        - errchkjson
+        - errname
+        - errorlint
+        - exhaustive
+        # - exhaustruct
+        - exptostd
+        - fatcontext
+        - forbidigo
+        - forcetypeassert
+        # - funlen
+        - ginkgolinter
+        - gocheckcompilerdirectives
+        # - gochecknoglobals
+        # - gochecknoinits
+        - gochecksumtype
+        # - gocognit
+        - goconst
+        - gocritic
+        # - gocyclo
+        # - godot
+        - godox
+        - goheader
+        - gomoddirectives
+        - gomodguard
+        - goprintffuncname
+        # - gosec
+        # - gosmopolitan
+        - govet
+        - grouper
+        - iface
+        - importas
+        - inamedparam
+        - ineffassign
+        - interfacebloat
+        - intrange
+        # - ireturn
+        # - lll
+        - loggercheck
+        # - maintidx
+        - makezero
+        - mirror
+        # - misspell
+        # - mnd
+        - musttag
+        # - nakedret
+        - nestif
+        # - nilerr
+        - nilnesserr
+        - nilnil
+        - nlreturn
+        - noctx
+        - nolintlint
+        # - nonamedreturns
+        - nosprintfhostport
+        - paralleltest
+        - perfsprint
+        - prealloc
+        - predeclared
+        - promlinter
+        - protogetter
+        - reassign
+        - recvcheck
+        # - revive
+        - rowserrcheck
+        - sloglint
+        - spancheck
+        - sqlclosecheck
+        - staticcheck
+        - tagalign
+        # - tagliatelle
+        - testableexamples
+        - testifylint
+        - testpackage
+        - thelper
+        - tparallel
+        - unconvert
+        - unparam
+        - unused
+        - usestdlibvars
+        - usetesting
+        # - varnamelen
+        - wastedassign
+        - whitespace
+        - wrapcheck
+        - wsl
+        - zerologlint
+
+    settings:
+        goconst:
+            min-len: 2
+            min-occurrences: 3
+        gocritic:
+            enabled-tags:
+                - performance
+                - experimental
+                - style
+                - opinionated
+            disabled-checks:
+                - captLocal
+                - whyNoLint
+        gocyclo:
+            min-complexity: 10
+        whitespace:
+            multi-if: true
+            multi-func: true
+
+issues:
+    whole-files: false
+    uniq-by-line: false
+
+output:
+    show-stats: false
+
+run:
+    timeout: 5m
+    tests: true
+    modules-download-mode: readonly
+    allow-parallel-runners: true
+    allow-serial-runners: true
+    go: '1.24'
