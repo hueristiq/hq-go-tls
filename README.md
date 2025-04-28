@@ -4,23 +4,25 @@
 
 ## Resource
 
-* [Features](#features)
-* [Usage](#usage)
-* [Contributing](#contributing)
-* [Licensing](#licensing)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Contributing](#contributing)
+- [Licensing](#licensing)
 
 ## Features
 
-## Usage
+## Installation
+
+To install `hq-go-tls`, run:
 
 ```bash
 go get -v -u github.com/hueristiq/hq-go-tls
 ```
 
-Here's a simple example demonstrating how to use `hq-go-tls`:
+Make sure your Go environment is set up properly (Go 1.x or later is recommended).
 
-```go
-```
+## Usage
 
 ## Contributing
 
