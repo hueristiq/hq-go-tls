@@ -126,10 +126,10 @@ func GenerateCACertificatePrivateKey(options *CACertificatePrivateKeyOptions) (C
 //   - err (error): An error with stack trace and metadata if directory creation, PEM conversion, or file writing fails;
 //     otherwise, nil.
 func SaveCACertificatePrivateKey(CACertificate *x509.Certificate, CACertificateFile string, CACertificatePrivateKey *rsa.PrivateKey, CACertificatePrivateKeyFile string) (err error) {
-	caCertFileDirectory := filepath.Dir(CACertificateFile)
+	CACertFileDirectory := filepath.Dir(CACertificateFile)
 
-	if err = mkdir(caCertFileDirectory); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to create directory for CA certificate", hqgoerrors.WithField("directory", caCertFileDirectory))
+	if err = mkdir(CACertFileDirectory); err != nil {
+		err = hqgoerrors.Wrap(err, "failed to create directory for CA certificate", hqgoerrors.WithField("directory", CACertFileDirectory))
 
 		return
 	}
@@ -162,29 +162,6 @@ func SaveCACertificatePrivateKey(CACertificate *x509.Certificate, CACertificateF
 		err = hqgoerrors.Wrap(err, "failed to write CA private key to file", hqgoerrors.WithField("file", CACertificatePrivateKeyFile))
 
 		return
-	}
-
-	return
-}
-
-// mkdir creates a directory at the specified path if it does not exist.
-//
-// The directory is created with permissions 0755. If the directory already exists, no action is taken.
-// Errors are wrapped with context and metadata using hq-go-errors.
-//
-// Parameters:
-//   - directory (string): The file system path for the directory to create.
-//
-// Returns:
-//   - err (error): An error with stack trace and metadata if directory creation fails; otherwise, nil.
-func mkdir(directory string) (err error) {
-	_, err = os.Stat(directory)
-	if os.IsNotExist(err) {
-		if err = os.MkdirAll(directory, 0o755); err != nil {
-			err = hqgoerrors.Wrap(err, "failed to create directory", hqgoerrors.WithField("directory", directory))
-
-			return
-		}
 	}
 
 	return
@@ -245,25 +222,6 @@ func CAPrivateKeyToPEM(CACertificatePrivateKey *rsa.PrivateKey) (raw *bytes.Buff
 	return
 }
 
-// writeToFile writes the content of a bytes.Buffer to a file with restrictive permissions.
-//
-// The file is written with permissions 0600 to ensure security for sensitive data like certificates
-// and private keys. Errors are wrapped with context and metadata using hq-go-errors.
-//
-// Parameters:
-//   - content (*bytes.Buffer): A bytes.Buffer containing the data to write.
-//   - file (string): The file path where the content will be written.
-//
-// Returns:
-//   - err (error): An error with stack trace and metadata if file writing fails; otherwise, nil.
-func writeToFile(content *bytes.Buffer, file string) (err error) {
-	if err = os.WriteFile(file, content.Bytes(), 0o600); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to write to file", hqgoerrors.WithField("file", file))
-	}
-
-	return
-}
-
 // LoadCACertificatePrivateKey loads a CA certificate and private key from the specified files.
 //
 // The certificate and private key are loaded from PEM-encoded files using the crypto/tls package.
@@ -299,6 +257,48 @@ func LoadCACertificatePrivateKey(CACertificateFile, CAPrivateKeyFile string) (CA
 		err = hqgoerrors.New("private key is not RSA", hqgoerrors.WithField("private_key_file", CAPrivateKeyFile), hqgoerrors.WithField("actual_type", fmt.Sprintf("%T", tlsCA.PrivateKey)))
 
 		return
+	}
+
+	return
+}
+
+// mkdir creates a directory at the specified path if it does not exist.
+//
+// The directory is created with permissions 0755. If the directory already exists, no action is taken.
+// Errors are wrapped with context and metadata using hq-go-errors.
+//
+// Parameters:
+//   - directory (string): The file system path for the directory to create.
+//
+// Returns:
+//   - err (error): An error with stack trace and metadata if directory creation fails; otherwise, nil.
+func mkdir(directory string) (err error) {
+	_, err = os.Stat(directory)
+	if os.IsNotExist(err) {
+		if err = os.MkdirAll(directory, 0o755); err != nil {
+			err = hqgoerrors.Wrap(err, "failed to create directory", hqgoerrors.WithField("directory", directory))
+
+			return
+		}
+	}
+
+	return
+}
+
+// writeToFile writes the content of a bytes.Buffer to a file with restrictive permissions.
+//
+// The file is written with permissions 0600 to ensure security for sensitive data like certificates
+// and private keys. Errors are wrapped with context and metadata using hq-go-errors.
+//
+// Parameters:
+//   - content (*bytes.Buffer): A bytes.Buffer containing the data to write.
+//   - file (string): The file path where the content will be written.
+//
+// Returns:
+//   - err (error): An error with stack trace and metadata if file writing fails; otherwise, nil.
+func writeToFile(content *bytes.Buffer, file string) (err error) {
+	if err = os.WriteFile(file, content.Bytes(), 0o600); err != nil {
+		err = hqgoerrors.Wrap(err, "failed to write to file", hqgoerrors.WithField("file", file))
 	}
 
 	return

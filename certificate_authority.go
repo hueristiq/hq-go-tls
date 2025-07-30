@@ -27,10 +27,10 @@ import (
 //   - _TLSPrivateKey (*rsa.PrivateKey): The RSA private key used for generated TLS certificates.
 //   - _SubjectKeyID ([]byte): The subject key identifier for the TLS private key, as per RFC 5280.
 type CertificateAuthority struct {
-	_CACertificate *x509.Certificate
-	_CAPrivateKey  *rsa.PrivateKey
-	_TLSPrivateKey *rsa.PrivateKey
-	_SubjectKeyID  []byte
+	_CACertificate    *x509.Certificate
+	_CAPrivateKey     *rsa.PrivateKey
+	_TLSPrivateKey    *rsa.PrivateKey
+	_TLSPrivateKeySKI []byte
 }
 
 // GetCACertificate returns the CA certificate stored in the CertificateAuthority.
@@ -82,7 +82,7 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 
 		host := normalizeHost(hello.ServerName)
 
-		certificate, err = CA.generateTLSCertificate([]string{host})
+		certificate, _, err = CA.GenerateTLSCertificate([]string{host})
 		if err != nil {
 			err = hqgoerrors.Wrap(err, "failed to generate TLS certificate")
 
@@ -93,7 +93,7 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 	}
 }
 
-// generateTLSCertificate generates a new TLS certificate signed by the CA for the specified hostname.
+// GenerateTLSCertificate generates a new TLS certificate signed by the CA for the specified hostname.
 //
 // The certificate is valid for 48 hours (from 24 hours in the past to 24 hours in the future),
 // includes a random serial number, and is configured for server authentication. It supports
@@ -109,7 +109,7 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 //     CA certificate, private key, and parsed leaf certificate.
 //   - err (error): An error with stack trace and metadata if serial number generation, certificate creation,
 //     or parsing fails; otherwise, nil.
-func (CA *CertificateAuthority) generateTLSCertificate(hosts []string) (certificate *tls.Certificate, err error) {
+func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string) (certificate *tls.Certificate, privKey *rsa.PrivateKey, err error) {
 	var serialNumber *big.Int
 
 	serialNumber, err = generateSerialNumber()
@@ -126,7 +126,7 @@ func (CA *CertificateAuthority) generateTLSCertificate(hosts []string) (certific
 		Subject: pkix.Name{
 			Organization: []string{"Hueristiq"},
 		},
-		SubjectKeyId:          CA._SubjectKeyID,
+		SubjectKeyId:          CA._TLSPrivateKeySKI,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
@@ -170,6 +170,8 @@ func (CA *CertificateAuthority) generateTLSCertificate(hosts []string) (certific
 		Leaf:        leaf,
 	}
 
+	privKey = CA._TLSPrivateKey
+
 	return
 }
 
@@ -212,9 +214,9 @@ func New(CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey) (CA *Cer
 
 	pubKey := TLSPrivateKey.Public()
 
-	var SKI []byte
+	var TLSPrivateKeySKI []byte
 
-	SKI, err = generateSubjectKeyID(pubKey)
+	TLSPrivateKeySKI, err = generateSubjectKeyID(pubKey)
 	if err != nil {
 		err = hqgoerrors.Wrap(err, "failed to generate subject key ID for TLS private key")
 
@@ -222,10 +224,10 @@ func New(CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey) (CA *Cer
 	}
 
 	CA = &CertificateAuthority{
-		_CACertificate: CACertificate,
-		_CAPrivateKey:  CAPrivateKey,
-		_TLSPrivateKey: TLSPrivateKey,
-		_SubjectKeyID:  SKI,
+		_CACertificate:    CACertificate,
+		_CAPrivateKey:     CAPrivateKey,
+		_TLSPrivateKey:    TLSPrivateKey,
+		_TLSPrivateKeySKI: TLSPrivateKeySKI,
 	}
 
 	return
