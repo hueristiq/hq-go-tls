@@ -8,6 +8,8 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"net/mail"
+	"net/url"
 	"time"
 
 	hqgoerrors "github.com/hueristiq/hq-go-errors"
@@ -71,14 +73,16 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 //   - (func(*tls.ClientHelloInfo) (*tls.Certificate, error)): A function that takes a tls.ClientHelloInfo and returns a tls.Certificate and an error.
 //     The error includes stack trace and metadata if certificate generation fails or SNI is missing.
 func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return func(clientHello *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
-		if clientHello.ServerName == "" {
+	return func(hello *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
+		if hello.ServerName == "" {
 			err = hqgoerrors.New("missing server name (SNI)")
 
 			return
 		}
 
-		certificate, err = CA.generateTLSCertificate(clientHello.ServerName)
+		hostname := normalizeHostname(hello.ServerName)
+
+		certificate, err = CA.generateTLSCertificate(hostname)
 		if err != nil {
 			err = hqgoerrors.Wrap(err, "failed to generate TLS certificate")
 
@@ -115,11 +119,6 @@ func (CA *CertificateAuthority) generateTLSCertificate(hostname string) (certifi
 		return
 	}
 
-	host, _, err := net.SplitHostPort(hostname)
-	if err == nil {
-		hostname = host
-	}
-
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
@@ -134,10 +133,14 @@ func (CA *CertificateAuthority) generateTLSCertificate(hostname string) (certifi
 		NotAfter:              time.Now().Add(24 * time.Hour),
 	}
 
-	if ip := net.ParseIP(hostname); ip != nil {
-		template.IPAddresses = []net.IP{ip}
+	if IP := net.ParseIP(hostname); IP != nil {
+		template.IPAddresses = append(template.IPAddresses, IP)
+	} else if email, err := mail.ParseAddress(hostname); err == nil && email.Address == hostname {
+		template.EmailAddresses = append(template.EmailAddresses, hostname)
+	} else if uriName, err := url.Parse(hostname); err == nil && uriName.Scheme != "" && uriName.Host != "" {
+		template.URIs = append(template.URIs, uriName)
 	} else {
-		template.DNSNames = []string{hostname}
+		template.DNSNames = append(template.DNSNames, hostname)
 	}
 
 	var certificateInBytes []byte
@@ -220,6 +223,17 @@ func New(CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey) (CA *Cer
 		_CAPrivateKey:  CAPrivateKey,
 		_TLSPrivateKey: TLSPrivateKey,
 		_SubjectKeyID:  SKI,
+	}
+
+	return
+}
+
+func normalizeHostname(unnormalized string) (normalized string) {
+	normalized = unnormalized
+	if h, _, err := net.SplitHostPort(unnormalized); err == nil {
+		normalized = h
+
+		return
 	}
 
 	return
