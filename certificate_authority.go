@@ -80,9 +80,9 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 			return
 		}
 
-		hostname := normalizeHostname(hello.ServerName)
+		host := normalizeHost(hello.ServerName)
 
-		certificate, err = CA.generateTLSCertificate(hostname)
+		certificate, err = CA.generateTLSCertificate([]string{host})
 		if err != nil {
 			err = hqgoerrors.Wrap(err, "failed to generate TLS certificate")
 
@@ -102,14 +102,14 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 // with context and metadata using hq-go-errors.
 //
 // Parameters:
-//   - hostname (string): The server name (DNS name or IP address) for the certificate.
+//   - hosts ([]string): The server name (DNS name or IP address) for the certificate.
 //
 // Returns:
 //   - certificate (*tls.Certificate): A pointer to a tls.Certificate containing the generated certificate,
 //     CA certificate, private key, and parsed leaf certificate.
 //   - err (error): An error with stack trace and metadata if serial number generation, certificate creation,
 //     or parsing fails; otherwise, nil.
-func (CA *CertificateAuthority) generateTLSCertificate(hostname string) (certificate *tls.Certificate, err error) {
+func (CA *CertificateAuthority) generateTLSCertificate(hosts []string) (certificate *tls.Certificate, err error) {
 	var serialNumber *big.Int
 
 	serialNumber, err = generateSerialNumber()
@@ -119,28 +119,31 @@ func (CA *CertificateAuthority) generateTLSCertificate(hostname string) (certifi
 		return
 	}
 
+	now := time.Now()
+
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:   hostname,
 			Organization: []string{"Hueristiq"},
 		},
 		SubjectKeyId:          CA._SubjectKeyID,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		NotBefore:             time.Now().Add(-24 * time.Hour),
-		NotAfter:              time.Now().Add(24 * time.Hour),
+		NotBefore:             now,
+		NotAfter:              now.Add(24 * time.Hour),
 	}
 
-	if IP := net.ParseIP(hostname); IP != nil {
-		template.IPAddresses = append(template.IPAddresses, IP)
-	} else if email, err := mail.ParseAddress(hostname); err == nil && email.Address == hostname {
-		template.EmailAddresses = append(template.EmailAddresses, hostname)
-	} else if uriName, err := url.Parse(hostname); err == nil && uriName.Scheme != "" && uriName.Host != "" {
-		template.URIs = append(template.URIs, uriName)
-	} else {
-		template.DNSNames = append(template.DNSNames, hostname)
+	for _, host := range hosts {
+		if IP := net.ParseIP(host); IP != nil {
+			template.IPAddresses = append(template.IPAddresses, IP)
+		} else if email, err := mail.ParseAddress(host); err == nil && email.Address == host {
+			template.EmailAddresses = append(template.EmailAddresses, host)
+		} else if uriName, err := url.Parse(host); err == nil && uriName.Scheme != "" && uriName.Host != "" {
+			template.URIs = append(template.URIs, uriName)
+		} else {
+			template.DNSNames = append(template.DNSNames, host)
+		}
 	}
 
 	var certificateInBytes []byte
@@ -228,10 +231,11 @@ func New(CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey) (CA *Cer
 	return
 }
 
-func normalizeHostname(unnormalized string) (normalized string) {
+func normalizeHost(unnormalized string) (normalized string) {
 	normalized = unnormalized
-	if h, _, err := net.SplitHostPort(unnormalized); err == nil {
-		normalized = h
+
+	if host, _, err := net.SplitHostPort(unnormalized); err == nil {
+		normalized = host
 
 		return
 	}

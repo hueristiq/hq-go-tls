@@ -75,7 +75,7 @@ func GenerateCACertificatePrivateKey(options *CACertificatePrivateKeyOptions) (C
 
 	now := time.Now()
 
-	template := x509.Certificate{
+	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			CommonName:   options.CommonName,
@@ -93,7 +93,7 @@ func GenerateCACertificatePrivateKey(options *CACertificatePrivateKeyOptions) (C
 
 	var CACertificateInBytes []byte
 
-	CACertificateInBytes, err = x509.CreateCertificate(rand.Reader, &template, &template, CAPublicKey, CAPrivateKey)
+	CACertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, template, CAPublicKey, CAPrivateKey)
 	if err != nil {
 		err = hqgoerrors.Wrap(err, "failed to create CA certificate")
 
