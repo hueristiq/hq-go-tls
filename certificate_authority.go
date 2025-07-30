@@ -16,39 +16,125 @@ import (
 )
 
 // CertificateAuthority represents a Certificate Authority (CA) for generating and signing TLS certificates.
-//
-// It holds a CA certificate, its private key, a private key for TLS certificates, and a subject key identifier.
-// The struct provides methods to generate TLS configurations and certificates dynamically based on
-// Server Name Indication (SNI) hostnames.
+// It encapsulates a CA certificate and its private key, providing methods to generate TLS configurations
+// and certificates dynamically based on Server Name Indication (SNI) hostnames.
 //
 // Fields:
 //   - _CACertificate (*x509.Certificate): The X.509 CA certificate used to sign TLS certificates.
 //   - _CAPrivateKey (*rsa.PrivateKey): The RSA private key corresponding to the CA certificate.
-//   - _TLSPrivateKey (*rsa.PrivateKey): The RSA private key used for generated TLS certificates.
-//   - _SubjectKeyID ([]byte): The subject key identifier for the TLS private key, as per RFC 5280.
 type CertificateAuthority struct {
-	_CACertificate    *x509.Certificate
-	_CAPrivateKey     *rsa.PrivateKey
-	_TLSPrivateKey    *rsa.PrivateKey
-	_TLSPrivateKeySKI []byte
+	_CACertificate *x509.Certificate
+	_CAPrivateKey  *rsa.PrivateKey
 }
 
-// GetCACertificate returns the CA certificate stored in the CertificateAuthority.
+// GenerateTLSCertificate generates a new X.509 TLS certificate and its corresponding RSA private key.
+//
+// This function creates a 2048-bit RSA private key and a TLS certificate signed by the CA, based on the
+// provided configuration options and hostnames. The certificate includes a random serial number, a subject
+// key identifier (SKI), and supports key encipherment and digital signatures. Hostnames are parsed to
+// determine if they represent IP addresses, email addresses, URIs, or DNS names, and are added to the
+// appropriate certificate fields. Errors are wrapped with context and metadata using hq-go-errors.
+//
+// Parameters:
+//   - hosts ([]string): A slice of hostnames (e.g., DNS names, IPs, emails, or URIs) to include in the certificate.
+//   - TLSCertificatePrivateKeyOptionFuncs (...TLSCertificatePrivateKeyOptionFunc): A variadic list of TLSCertificatePrivateKeyOptionFunc functions
+//     to configure the certificate's properties (e.g., CommonName, Organization, ValidFrom, ValidFor).
 //
 // Returns:
-//   - CACertificate (*x509.Certificate): A pointer to the X.509 CA certificate.
-func (CA *CertificateAuthority) GetCACertificate() (CACertificate *x509.Certificate) {
-	CACertificate = CA._CACertificate
+//   - TLSCertificate (*x509.Certificate): A pointer to the generated X.509 TLS certificate.
+//   - TLSPrivateKey (*rsa.PrivateKey): A pointer to the generated RSA private key.
+//   - err (error): An error with stack trace and metadata if key generation, SKI generation, serial number generation,
+//     certificate creation, or parsing fails; otherwise, nil.
+func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, TLSCertificatePrivateKeyOptionFuncs ...TLSCertificatePrivateKeyOptionFunc) (TLSCertificate *x509.Certificate, TLSPrivateKey *rsa.PrivateKey, err error) {
+	options := &_TLSCertificatePrivateKeyOptions{
+		CommonName: "Acme CA",
+		Organization: []string{
+			"Acme Co",
+		},
+		ValidFrom: time.Now(),
+		ValidFor:  365 * 24 * time.Hour,
+	}
+
+	for _, f := range TLSCertificatePrivateKeyOptionFuncs {
+		f(options)
+	}
+
+	TLSPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		err = hqgoerrors.Wrap(err, "failed to generate RSA private key")
+
+		return
+	}
+
+	TLSPublicKey := TLSPrivateKey.Public()
+
+	var TLSPrivateKeySKI []byte
+
+	TLSPrivateKeySKI, err = generateSubjectKeyID(TLSPublicKey)
+	if err != nil {
+		err = hqgoerrors.Wrap(err, "failed to generate subject key ID")
+
+		return
+	}
+
+	var serialNumber *big.Int
+
+	serialNumber, err = generateSerialNumber()
+	if err != nil {
+		err = hqgoerrors.Wrap(err, "failed to generate serial")
+
+		return
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: options.Organization,
+		},
+		SubjectKeyId:          TLSPrivateKeySKI,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		NotBefore:             options.ValidFrom.Add(-5 * time.Minute),
+		NotAfter:              options.ValidFrom.Add(options.ValidFor),
+	}
+
+	for _, host := range hosts {
+		if IP := net.ParseIP(host); IP != nil {
+			template.IPAddresses = append(template.IPAddresses, IP)
+		} else if email, err := mail.ParseAddress(host); err == nil && email.Address == host {
+			template.EmailAddresses = append(template.EmailAddresses, host)
+		} else if uriName, err := url.Parse(host); err == nil && uriName.Scheme != "" && uriName.Host != "" {
+			template.URIs = append(template.URIs, uriName)
+		} else {
+			template.DNSNames = append(template.DNSNames, host)
+		}
+	}
+
+	var TLSCertificateInBytes []byte
+
+	TLSCertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, CA._CACertificate, TLSPublicKey, CA._CAPrivateKey)
+	if err != nil {
+		err = hqgoerrors.Wrap(err, "failed to create certificate")
+
+		return
+	}
+
+	TLSCertificate, err = x509.ParseCertificate(TLSCertificateInBytes)
+	if err != nil {
+		err = hqgoerrors.Wrap(err, "failed to parse certificate")
+
+		return
+	}
 
 	return
 }
 
 // NewTLSConfig creates a TLS configuration for use in a TLS server.
 //
-// The configuration includes a dynamic certificate generation function based on
-// Server Name Indication (SNI) and sets a minimum TLS version of TLS 1.2.
-// It also specifies supported protocols for Application-Layer Protocol Negotiation (ALPN).
-// Errors during certificate generation are handled within the GetCertificate callback.
+// The configuration includes a dynamic certificate generation function based on Server Name Indication
+// (SNI) and sets a minimum TLS version of TLS 1.2. It also specifies supported protocols for
+// Application-Layer Protocol Negotiation (ALPN), including HTTP/1.0, HTTP/1.1, and HTTP/2.0.
 //
 // Returns:
 //   - cfg (*tls.Config): A pointer to a tls.Config with a dynamic certificate generation function.
@@ -64,10 +150,10 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 
 // getTLSCertificateFunc returns a function to generate TLS certificates based on SNI.
 //
-// The returned function is used as the GetCertificate callback in a tls.Config.
-// It generates a new TLS certificate for the provided server name (from SNI) or
-// returns an error if the server name is missing. Errors are wrapped with context
-// and metadata using hq-go-errors.
+// The returned function is used as the GetCertificate callback in a tls.Config. It generates a new
+// TLS certificate for the provided server name (from SNI) with a short validity period (24 hours).
+// If the server name is missing, an error is returned. Errors are wrapped with context and metadata
+// using hq-go-errors for better traceability.
 //
 // Returns:
 //   - (func(*tls.ClientHelloInfo) (*tls.Certificate, error)): A function that takes a tls.ClientHelloInfo and returns a tls.Certificate and an error.
@@ -82,105 +168,105 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 
 		host := normalizeHost(hello.ServerName)
 
-		certificate, _, err = CA.GenerateTLSCertificate([]string{host})
+		var TLSCertificate *x509.Certificate
+
+		var TLSPrivateKey *rsa.PrivateKey
+
+		TLSCertificate, TLSPrivateKey, err = CA.GenerateTLSCertificate([]string{host}, TLSCertificatePrivateKeyWithValidFor(24*time.Hour))
 		if err != nil {
-			err = hqgoerrors.Wrap(err, "failed to generate TLS certificate")
+			err = hqgoerrors.Wrap(err, "failed to generate certificate")
 
 			return
 		}
 
+		certificate = &tls.Certificate{
+			Certificate: [][]byte{TLSCertificate.Raw, CA._CACertificate.Raw},
+			PrivateKey:  TLSPrivateKey,
+			Leaf:        TLSCertificate,
+		}
+
 		return
 	}
 }
 
-// GenerateTLSCertificate generates a new TLS certificate signed by the CA for the specified hostname.
+// _TLSCertificatePrivateKeyOptions defines configuration options for generating a TLS certificate and private key pair.
+// This struct is used internally to configure the properties of a TLS certificate signed by the CA.
 //
-// The certificate is valid for 48 hours (from 24 hours in the past to 24 hours in the future),
-// includes a random serial number, and is configured for server authentication. It supports
-// either an IP address or DNS name based on the hostname. The certificate is signed using the
-// CA's private key and includes the CA certificate in the certificate chain. Errors are wrapped
-// with context and metadata using hq-go-errors.
+// Fields:
+//   - CommonName (string): Common Name (CN) for the certificate's subject, typically the CA's name (e.g., "Acme CA").
+//   - Organization ([]string): Organization names included in the certificate's subject (e.g., ["Acme Co"]).
+//   - ValidFrom (time.Time): The start time from which the certificate is valid. Defaults to the current time if not set.
+//   - ValidFor (time.Duration): The duration for which the certificate is valid from ValidFrom (e.g., 365 days)
+type _TLSCertificatePrivateKeyOptions struct {
+	CommonName   string
+	Organization []string
+	ValidFrom    time.Time
+	ValidFor     time.Duration
+}
+
+// TLSCertificatePrivateKeyOptionFunc is a function type for configuring _TLSCertificatePrivateKeyOptions
+// using the functional options pattern. It allows flexible configuration of TLS certificate options.
 //
 // Parameters:
-//   - hosts ([]string): The server name (DNS name or IP address) for the certificate.
+//   - options (*_TLSCertificatePrivateKeyOptions): A pointer to _TLSCertificatePrivateKeyOptions to be modified.
+type TLSCertificatePrivateKeyOptionFunc func(options *_TLSCertificatePrivateKeyOptions)
+
+// TLSCertificatePrivateKeyWithCommonName sets the Common Name (CN) for the TLS certificate's subject.
+//
+// Parameters:
+//   - commonName (string): The Common Name to set in the certificate's subject (e.g., "Acme CA").
 //
 // Returns:
-//   - certificate (*tls.Certificate): A pointer to a tls.Certificate containing the generated certificate,
-//     CA certificate, private key, and parsed leaf certificate.
-//   - err (error): An error with stack trace and metadata if serial number generation, certificate creation,
-//     or parsing fails; otherwise, nil.
-func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string) (certificate *tls.Certificate, privKey *rsa.PrivateKey, err error) {
-	var serialNumber *big.Int
-
-	serialNumber, err = generateSerialNumber()
-	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate serial number for TLS certificate")
-
-		return
+//   - (TLSCertificatePrivateKeyOptionFunc): A TLSCertificatePrivateKeyOptionFunc that updates the CommonName field of the options.
+func TLSCertificatePrivateKeyWithCommonName(commonName string) TLSCertificatePrivateKeyOptionFunc {
+	return func(options *_TLSCertificatePrivateKeyOptions) {
+		options.CommonName = commonName
 	}
+}
 
-	now := time.Now()
-
-	template := &x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Hueristiq"},
-		},
-		SubjectKeyId:          CA._TLSPrivateKeySKI,
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		NotBefore:             now,
-		NotAfter:              now.Add(24 * time.Hour),
+// TLSCertificatePrivateKeyWithOrganization sets the Organization field for the TLS certificate's subject.
+//
+// Parameters:
+//   - organization ([]string): A slice of organization names to set in the certificate's subject (e.g., ["Acme Co"]).
+//
+// Returns:
+//   - (TLSCertificatePrivateKeyOptionFunc): A TLSCertificatePrivateKeyOptionFunc that updates the Organization field of the options.
+func TLSCertificatePrivateKeyWithOrganization(organization []string) TLSCertificatePrivateKeyOptionFunc {
+	return func(options *_TLSCertificatePrivateKeyOptions) {
+		options.Organization = organization
 	}
+}
 
-	for _, host := range hosts {
-		if IP := net.ParseIP(host); IP != nil {
-			template.IPAddresses = append(template.IPAddresses, IP)
-		} else if email, err := mail.ParseAddress(host); err == nil && email.Address == host {
-			template.EmailAddresses = append(template.EmailAddresses, host)
-		} else if uriName, err := url.Parse(host); err == nil && uriName.Scheme != "" && uriName.Host != "" {
-			template.URIs = append(template.URIs, uriName)
-		} else {
-			template.DNSNames = append(template.DNSNames, host)
-		}
+// TLSCertificatePrivateKeyWithValidFrom sets the start time for the TLS certificate's validity period.
+//
+// Parameters:
+//   - validFrom (time.Time): The time from which the certificate is valid (e.g., time.Now()).
+//
+// Returns:
+//   - (TLSCertificatePrivateKeyOptionFunc): A TLSCertificatePrivateKeyOptionFunc that updates the ValidFrom field of the options.
+func TLSCertificatePrivateKeyWithValidFrom(validFrom time.Time) TLSCertificatePrivateKeyOptionFunc {
+	return func(options *_TLSCertificatePrivateKeyOptions) {
+		options.ValidFrom = validFrom
 	}
+}
 
-	var certificateInBytes []byte
-
-	certificateInBytes, err = x509.CreateCertificate(rand.Reader, template, CA._CACertificate, CA._TLSPrivateKey.Public(), CA._CAPrivateKey)
-	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to create TLS certificate")
-
-		return
+// TLSCertificatePrivateKeyWithValidFor sets the duration for the TLS certificate's validity period.
+//
+// Parameters:
+//   - validFor (time.Duration): The duration for which the certificate is valid from ValidFrom (e.g., 365*24*time.Hour).
+//
+// Returns:
+//   - (TLSCertificatePrivateKeyOptionFunc): A TLSCertificatePrivateKeyOptionFunc that updates the ValidFor field of the options.
+func TLSCertificatePrivateKeyWithValidFor(validFor time.Duration) TLSCertificatePrivateKeyOptionFunc {
+	return func(options *_TLSCertificatePrivateKeyOptions) {
+		options.ValidFor = validFor
 	}
-
-	var leaf *x509.Certificate
-
-	leaf, err = x509.ParseCertificate(certificateInBytes)
-	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to parse TLS certificate")
-
-		return
-	}
-
-	certificate = &tls.Certificate{
-		Certificate: [][]byte{certificateInBytes, CA._CACertificate.Raw},
-		PrivateKey:  CA._TLSPrivateKey,
-		Leaf:        leaf,
-	}
-
-	privKey = CA._TLSPrivateKey
-
-	return
 }
 
 // New initializes a new CertificateAuthority with the provided CA certificate and private key.
 //
-// It verifies that the certificate is configured as a CA and has the necessary key usage for
-// certificate signing. A new 2048-bit RSA private key is generated for TLS certificates, and a
-// subject key identifier is computed for it. Errors are wrapped with context and metadata using
-// hq-go-errors.
+// It verifies that the certificate is configured as a CA and has the necessary key usage for certificate
+// signing. Errors are wrapped with context and metadata using hq-go-errors for improved debugging.
 //
 // Parameters:
 //   - CACertificate (*x509.Certificate): A pointer to the X.509 CA certificate.
@@ -188,8 +274,8 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string) (certific
 //
 // Returns:
 //   - CA (*CertificateAuthority): A pointer to the initialized CertificateAuthority.
-//   - err (error): An error with stack trace and metadata if the CA certificate is invalid, key generation
-//     fails, or subject key ID generation fails; otherwise, nil.
+//   - err (error): An error with stack trace and metadata if the CA certificate is invalid or lacks certSign key
+//     usage; otherwise, nil.
 func New(CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey) (CA *CertificateAuthority, err error) {
 	if !CACertificate.IsCA {
 		err = hqgoerrors.New("certificate is not configured as CA")
@@ -203,36 +289,24 @@ func New(CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey) (CA *Cer
 		return
 	}
 
-	var TLSPrivateKey *rsa.PrivateKey
-
-	TLSPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate TLS private key")
-
-		return
-	}
-
-	pubKey := TLSPrivateKey.Public()
-
-	var TLSPrivateKeySKI []byte
-
-	TLSPrivateKeySKI, err = generateSubjectKeyID(pubKey)
-	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate subject key ID for TLS private key")
-
-		return
-	}
-
 	CA = &CertificateAuthority{
-		_CACertificate:    CACertificate,
-		_CAPrivateKey:     CAPrivateKey,
-		_TLSPrivateKey:    TLSPrivateKey,
-		_TLSPrivateKeySKI: TLSPrivateKeySKI,
+		_CACertificate: CACertificate,
+		_CAPrivateKey:  CAPrivateKey,
 	}
 
 	return
 }
 
+// normalizeHost normalizes a hostname by removing the port number if present.
+//
+// It splits the hostname using net.SplitHostPort and returns the host component. If no port is present,
+// the original hostname is returned unchanged.
+//
+// Parameters:
+//   - unnormalized (string): The hostname to normalize (e.g., "example.com:443").
+//
+// Returns:
+//   - normalized (string): The normalized hostname (e.g., "example.com").
 func normalizeHost(unnormalized string) (normalized string) {
 	normalized = unnormalized
 
