@@ -32,8 +32,8 @@ type _CACertificatePrivateKeyOptions struct {
 // using the functional options pattern. It allows flexible and extensible configuration of CA certificate options.
 //
 // Parameters:
-//   - options (*_CACertificatePrivateKeyOptions): A pointer to _CACertificatePrivateKeyOptions to be modified.
-type CACertificatePrivateKeyOptionFunc func(options *_CACertificatePrivateKeyOptions)
+//   - opts (*_CACertificatePrivateKeyOptions): A pointer to _CACertificatePrivateKeyOptions to be modified.
+type CACertificatePrivateKeyOptionFunc func(opts *_CACertificatePrivateKeyOptions)
 
 // CACertificatePrivateKeyWithCommonName sets the Common Name (CN) for the CA certificate's subject.
 //
@@ -43,8 +43,8 @@ type CACertificatePrivateKeyOptionFunc func(options *_CACertificatePrivateKeyOpt
 // Returns:
 //   - (CACertificatePrivateKeyOptionFunc): A CACertificatePrivateKeyOptionFunc that updates the CommonName field of the options.
 func CACertificatePrivateKeyWithCommonName(commonName string) CACertificatePrivateKeyOptionFunc {
-	return func(options *_CACertificatePrivateKeyOptions) {
-		options.CommonName = commonName
+	return func(opts *_CACertificatePrivateKeyOptions) {
+		opts.CommonName = commonName
 	}
 }
 
@@ -56,8 +56,8 @@ func CACertificatePrivateKeyWithCommonName(commonName string) CACertificatePriva
 // Returns:
 //   - (CACertificatePrivateKeyOptionFunc): A CACertificatePrivateKeyOptionFunc that updates the Organization field of the options.
 func CACertificatePrivateKeyWithOrganization(organization []string) CACertificatePrivateKeyOptionFunc {
-	return func(options *_CACertificatePrivateKeyOptions) {
-		options.Organization = organization
+	return func(opts *_CACertificatePrivateKeyOptions) {
+		opts.Organization = organization
 	}
 }
 
@@ -69,8 +69,8 @@ func CACertificatePrivateKeyWithOrganization(organization []string) CACertificat
 // Returns:
 //   - (CACertificatePrivateKeyOptionFunc): A CACertificatePrivateKeyOptionFunc that updates the ValidFrom field of the options.
 func CACertificatePrivateKeyWithValidFrom(validFrom time.Time) CACertificatePrivateKeyOptionFunc {
-	return func(options *_CACertificatePrivateKeyOptions) {
-		options.ValidFrom = validFrom
+	return func(opts *_CACertificatePrivateKeyOptions) {
+		opts.ValidFrom = validFrom
 	}
 }
 
@@ -82,8 +82,8 @@ func CACertificatePrivateKeyWithValidFrom(validFrom time.Time) CACertificatePriv
 // Returns:
 //   - (CACertificatePrivateKeyOptionFunc): A CACertificatePrivateKeyOptionFunc that updates the ValidFor field of the options.
 func CACertificatePrivateKeyWithValidFor(validFor time.Duration) CACertificatePrivateKeyOptionFunc {
-	return func(options *_CACertificatePrivateKeyOptions) {
-		options.ValidFor = validFor
+	return func(opts *_CACertificatePrivateKeyOptions) {
+		opts.ValidFor = validFor
 	}
 }
 
@@ -96,7 +96,7 @@ func CACertificatePrivateKeyWithValidFor(validFor time.Duration) CACertificatePr
 // extends for ValidFor (defaulting to 365 days). Errors are wrapped with context and metadata using hq-go-errors.
 //
 // Parameters:
-//   - CACertificatePrivateKeyOptionFuncs (...CACertificatePrivateKeyOptionFunc): A variadic list of CACertificatePrivateKeyOptionFunc functions to configure
+//   - ofs (...CACertificatePrivateKeyOptionFunc): A variadic list of CACertificatePrivateKeyOptionFunc functions to configure
 //     the certificate's properties (e.g., CommonName, Organization, ValidFrom, ValidFor).
 //
 // Returns:
@@ -104,8 +104,8 @@ func CACertificatePrivateKeyWithValidFor(validFor time.Duration) CACertificatePr
 //   - CAPrivateKey (*rsa.PrivateKey): A pointer to the generated RSA private key.
 //   - err (error): An error with stack trace and metadata if key generation, SKI generation, serial number generation,
 //     certificate creation, or parsing fails; otherwise, nil.
-func GenerateCACertificatePrivateKey(CACertificatePrivateKeyOptionFuncs ...CACertificatePrivateKeyOptionFunc) (CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey, err error) {
-	options := &_CACertificatePrivateKeyOptions{
+func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey, err error) {
+	opts := &_CACertificatePrivateKeyOptions{
 		CommonName: "Acme CA",
 		Organization: []string{
 			"Acme Co",
@@ -114,8 +114,8 @@ func GenerateCACertificatePrivateKey(CACertificatePrivateKeyOptionFuncs ...CACer
 		ValidFor:  365 * 24 * time.Hour,
 	}
 
-	for _, f := range CACertificatePrivateKeyOptionFuncs {
-		f(options)
+	for _, f := range ofs {
+		f(opts)
 	}
 
 	CAPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
@@ -148,16 +148,16 @@ func GenerateCACertificatePrivateKey(CACertificatePrivateKeyOptionFuncs ...CACer
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:   options.CommonName,
-			Organization: options.Organization,
+			CommonName:   opts.CommonName,
+			Organization: opts.Organization,
 		},
 		SubjectKeyId:          CAPrivateKeySKI,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		NotBefore:             options.ValidFrom.Add(-5 * time.Minute),
-		NotAfter:              options.ValidFrom.Add(options.ValidFor),
-		DNSNames:              []string{options.CommonName},
+		NotBefore:             opts.ValidFrom.Add(-5 * time.Minute),
+		NotAfter:              opts.ValidFrom.Add(opts.ValidFor),
+		DNSNames:              []string{opts.CommonName},
 		IsCA:                  true,
 	}
 

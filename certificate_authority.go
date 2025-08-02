@@ -37,7 +37,7 @@ type CertificateAuthority struct {
 //
 // Parameters:
 //   - hosts ([]string): A slice of hostnames (e.g., DNS names, IPs, emails, or URIs) to include in the certificate.
-//   - TLSCertificatePrivateKeyOptionFuncs (...TLSCertificatePrivateKeyOptionFunc): A variadic list of TLSCertificatePrivateKeyOptionFunc functions
+//   - ofs (...TLSCertificatePrivateKeyOptionFunc): A variadic list of TLSCertificatePrivateKeyOptionFunc functions
 //     to configure the certificate's properties (e.g., CommonName, Organization, ValidFrom, ValidFor).
 //
 // Returns:
@@ -45,8 +45,8 @@ type CertificateAuthority struct {
 //   - TLSPrivateKey (*rsa.PrivateKey): A pointer to the generated RSA private key.
 //   - err (error): An error with stack trace and metadata if key generation, SKI generation, serial number generation,
 //     certificate creation, or parsing fails; otherwise, nil.
-func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, TLSCertificatePrivateKeyOptionFuncs ...TLSCertificatePrivateKeyOptionFunc) (TLSCertificate *x509.Certificate, TLSPrivateKey *rsa.PrivateKey, err error) {
-	options := &_TLSCertificatePrivateKeyOptions{
+func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TLSCertificatePrivateKeyOptionFunc) (TLSCertificate *x509.Certificate, TLSPrivateKey *rsa.PrivateKey, err error) {
+	opts := &_TLSCertificatePrivateKeyOptions{
 		CommonName: "Acme CA",
 		Organization: []string{
 			"Acme Co",
@@ -55,8 +55,8 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, TLSCertif
 		ValidFor:  365 * 24 * time.Hour,
 	}
 
-	for _, f := range TLSCertificatePrivateKeyOptionFuncs {
-		f(options)
+	for _, f := range ofs {
+		f(opts)
 	}
 
 	TLSPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
@@ -89,14 +89,14 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, TLSCertif
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: options.Organization,
+			Organization: opts.Organization,
 		},
 		SubjectKeyId:          TLSPrivateKeySKI,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		NotBefore:             options.ValidFrom.Add(-5 * time.Minute),
-		NotAfter:              options.ValidFrom.Add(options.ValidFor),
+		NotBefore:             opts.ValidFrom.Add(-5 * time.Minute),
+		NotAfter:              opts.ValidFrom.Add(opts.ValidFor),
 	}
 
 	for _, host := range hosts {
@@ -208,8 +208,8 @@ type _TLSCertificatePrivateKeyOptions struct {
 // using the functional options pattern. It allows flexible configuration of TLS certificate options.
 //
 // Parameters:
-//   - options (*_TLSCertificatePrivateKeyOptions): A pointer to _TLSCertificatePrivateKeyOptions to be modified.
-type TLSCertificatePrivateKeyOptionFunc func(options *_TLSCertificatePrivateKeyOptions)
+//   - opts (*_TLSCertificatePrivateKeyOptions): A pointer to _TLSCertificatePrivateKeyOptions to be modified.
+type TLSCertificatePrivateKeyOptionFunc func(opts *_TLSCertificatePrivateKeyOptions)
 
 // TLSCertificatePrivateKeyWithCommonName sets the Common Name (CN) for the TLS certificate's subject.
 //
