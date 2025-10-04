@@ -6,13 +6,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"net/mail"
 	"net/url"
 	"time"
-
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
 )
 
 // CertificateAuthority represents a Certificate Authority (CA) for generating and signing TLS certificates.
@@ -61,7 +61,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	TLSPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate RSA private key")
+		err = fmt.Errorf("failed to generate RSA private key: %w", err)
 
 		return
 	}
@@ -72,7 +72,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	TLSPrivateKeySKI, err = generateSubjectKeyID(TLSPublicKey)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate subject key ID")
+		err = fmt.Errorf("failed to generate subject key ID: %w", err)
 
 		return
 	}
@@ -81,7 +81,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	serialNumber, err = generateSerialNumber()
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate serial")
+		err = fmt.Errorf("failed to generate serial: %w", err)
 
 		return
 	}
@@ -115,14 +115,14 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	TLSCertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, CA._CACertificate, TLSPublicKey, CA._CAPrivateKey)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to create certificate")
+		err = fmt.Errorf("failed to create certificate: %w", err)
 
 		return
 	}
 
 	TLSCertificate, err = x509.ParseCertificate(TLSCertificateInBytes)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to parse certificate")
+		err = fmt.Errorf("failed to parse certificate: %w", err)
 
 		return
 	}
@@ -161,7 +161,7 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(hello *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
 		if hello.ServerName == "" {
-			err = hqgoerrors.New("missing server name (SNI)")
+			err = errors.New("missing server name (SNI)")
 
 			return
 		}
@@ -174,7 +174,7 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 
 		TLSCertificate, TLSPrivateKey, err = CA.GenerateTLSCertificate([]string{host}, TLSCertificatePrivateKeyWithValidFor(24*time.Hour))
 		if err != nil {
-			err = hqgoerrors.Wrap(err, "failed to generate certificate")
+			err = fmt.Errorf("failed to generate certificate: %w", err)
 
 			return
 		}
@@ -278,13 +278,13 @@ func TLSCertificatePrivateKeyWithValidFor(validFor time.Duration) TLSCertificate
 //     usage; otherwise, nil.
 func New(CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey) (CA *CertificateAuthority, err error) {
 	if !CACertificate.IsCA {
-		err = hqgoerrors.New("certificate is not configured as CA")
+		err = errors.New("certificate is not configured as CA")
 
 		return
 	}
 
 	if (CACertificate.KeyUsage & x509.KeyUsageCertSign) == 0 {
-		err = hqgoerrors.New("CA certificate missing certSign key usage")
+		err = errors.New("CA certificate missing certSign key usage")
 
 		return
 	}
