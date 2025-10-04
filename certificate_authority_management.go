@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"math/big"
 	"time"
-
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
 )
 
 // _CACertificatePrivateKeyOptions defines configuration options for generating a CA certificate and private key pair.
@@ -120,7 +118,7 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 
 	CAPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate RSA private key")
+		err = fmt.Errorf("failed to generate RSA private key: %w", err)
 
 		return
 	}
@@ -131,7 +129,7 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 
 	CAPrivateKeySKI, err = generateSubjectKeyID(CAPublicKey)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate subject key ID")
+		err = fmt.Errorf("failed to generate subject key ID: %w", err)
 
 		return
 	}
@@ -140,7 +138,7 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 
 	serialNumber, err = generateSerialNumber()
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate serial number")
+		err = fmt.Errorf("failed to generate serial number: %w", err)
 
 		return
 	}
@@ -165,14 +163,14 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 
 	CACertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, template, CAPublicKey, CAPrivateKey)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to create CA certificate")
+		err = fmt.Errorf("failed to create CA certificate: %w", err)
 
 		return
 	}
 
 	CACertificate, err = x509.ParseCertificate(CACertificateInBytes)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to parse CA certificate")
+		err = fmt.Errorf("failed to parse CA certificate: %w", err)
 
 		return
 	}
@@ -197,21 +195,21 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 func LoadCACertificatePrivateKey(CACertificateFilePath, CAPrivateKeyFilePath string) (CACertificate *x509.Certificate, CAPrivateKey *rsa.PrivateKey, err error) {
 	tlsCA, err := tls.LoadX509KeyPair(CACertificateFilePath, CAPrivateKeyFilePath)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to load CA certificate and private key", hqgoerrors.WithField("certificate_file", CACertificateFilePath), hqgoerrors.WithField("private_key_file", CAPrivateKeyFilePath))
+		err = fmt.Errorf("failed to load CA certificate and private key: %w", err)
 
 		return
 	}
 
 	CACertificate, err = x509.ParseCertificate(tlsCA.Certificate[0])
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to parse CA certificate", hqgoerrors.WithField("path", CACertificateFilePath))
+		err = fmt.Errorf("failed to parse CA certificate: %w", err)
 
 		return
 	}
 
 	CAPrivateKey, ok := tlsCA.PrivateKey.(*rsa.PrivateKey)
 	if !ok {
-		err = hqgoerrors.New("CA private key is not RSA", hqgoerrors.WithField("path", CAPrivateKeyFilePath), hqgoerrors.WithField("actual_type", fmt.Sprintf("%T", tlsCA.PrivateKey)))
+		err = fmt.Errorf("CA private key is not RSA: %w", err)
 
 		return
 	}

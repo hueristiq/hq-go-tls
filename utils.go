@@ -8,11 +8,11 @@ import (
 	"crypto/sha1"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
-
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
 )
 
 // generateSerialNumber creates a random serial number for use in X.509 certificates.
@@ -30,7 +30,7 @@ func generateSerialNumber() (serialNumber *big.Int, err error) {
 
 	serialNumber, err = rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to generate random serial number")
+		err = fmt.Errorf("failed to generate random serial number: %w", err)
 
 		return
 	}
@@ -59,13 +59,13 @@ func generateSerialNumber() (serialNumber *big.Int, err error) {
 func generateSubjectKeyID(publicKey crypto.PublicKey) (SKI []byte, err error) {
 	pkixPub, err := x509.MarshalPKIXPublicKey(publicKey)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to marshal public key to PKIX format")
+		err = fmt.Errorf("failed to marshal public key to PKIX format: %w", err)
 
 		return
 	}
 
 	if len(pkixPub) == 0 {
-		err = hqgoerrors.New("public key is enpty!")
+		err = errors.New("public key is enpty")
 
 		return
 	}
@@ -97,7 +97,7 @@ func SaveCertificatePrivateKey(certificate *x509.Certificate, certificateFilePat
 	certificateFilePathDirectory := filepath.Dir(certificateFilePath)
 
 	if err = mkdir(certificateFilePathDirectory); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to create directory for certificate", hqgoerrors.WithField("path", certificateFilePathDirectory))
+		err = fmt.Errorf("failed to create directory for certificate: %w", err)
 
 		return
 	}
@@ -106,13 +106,13 @@ func SaveCertificatePrivateKey(certificate *x509.Certificate, certificateFilePat
 
 	certificateContent, err = CertificateToPEM(certificate)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to convert certificate to PEM")
+		err = fmt.Errorf("failed to convert certificate to PEM: %w", err)
 
 		return
 	}
 
 	if err = writeToFile(certificateContent, certificateFilePath); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to write certificate to file", hqgoerrors.WithField("path", certificateFilePath))
+		err = fmt.Errorf("failed to write certificate to file: %w", err)
 
 		return
 	}
@@ -121,13 +121,13 @@ func SaveCertificatePrivateKey(certificate *x509.Certificate, certificateFilePat
 
 	privKeyContent, err = PrivateKeyToPEM(certificatePrivateKey)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to convert private key to PEM")
+		err = fmt.Errorf("failed to convert private key to PEM: %w", err)
 
 		return
 	}
 
 	if err = writeToFile(privKeyContent, certificatePrivKeyFilePath); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to write private key to file", hqgoerrors.WithField("path", certificatePrivKeyFilePath))
+		err = fmt.Errorf("failed to write private key to file: %w", err)
 
 		return
 	}
@@ -151,7 +151,7 @@ func CertificateToPEM(certificate *x509.Certificate) (raw *bytes.Buffer, err err
 	raw = new(bytes.Buffer)
 
 	if err = pem.Encode(raw, &pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to encode certificate to PEM")
+		err = fmt.Errorf("failed to encode certificate to PEM: %w", err)
 
 		return
 	}
@@ -178,13 +178,13 @@ func PrivateKeyToPEM(certificatePrivateKey *rsa.PrivateKey) (raw *bytes.Buffer, 
 
 	certificatePrivateKeyBytes, err = x509.MarshalPKCS8PrivateKey(certificatePrivateKey)
 	if err != nil {
-		err = hqgoerrors.Wrap(err, "failed to marshal private key to PKCS#8")
+		err = fmt.Errorf("failed to marshal private key to PKCS#8: %w", err)
 
 		return
 	}
 
 	if err = pem.Encode(raw, &pem.Block{Type: "PRIVATE KEY", Bytes: certificatePrivateKeyBytes}); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to encode private key to PEM")
+		err = fmt.Errorf("failed to encode private key to PEM: %w", err)
 
 		return
 	}
@@ -207,7 +207,7 @@ func mkdir(path string) (err error) {
 	_, err = os.Stat(path)
 	if os.IsNotExist(err) {
 		if err = os.MkdirAll(path, 0o755); err != nil {
-			err = hqgoerrors.Wrap(err, "failed to create directory", hqgoerrors.WithField("path", path))
+			err = fmt.Errorf("failed to create directory: %w", err)
 
 			return
 		}
@@ -229,7 +229,7 @@ func mkdir(path string) (err error) {
 //   - err (error): An error with stack trace and metadata if file writing fails; otherwise, nil.
 func writeToFile(content *bytes.Buffer, path string) (err error) {
 	if err = os.WriteFile(path, content.Bytes(), 0o600); err != nil {
-		err = hqgoerrors.Wrap(err, "failed to write to file", hqgoerrors.WithField("path", path))
+		err = fmt.Errorf("failed to write to file: %w", err)
 	}
 
 	return
