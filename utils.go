@@ -7,54 +7,44 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
-// LoadCACertificatePrivateKeyFromFiles loads a CA certificate and private key from the specified PEM-encoded files.
+// LoadCertificatePrivateKeyFromFiles loads a certificate and private key from the specified PEM-encoded files.
 //
 // The certificate and private key are loaded using the crypto/tls package. The certificate is parsed to ensure
 // it is a valid X.509 certificate, and the private key is verified to implement the crypto.Signer interface
-// and to be one of the supported types (RSA, ECDSA, or Ed25519). Errors are wrapped with context, error types,
-// and metadata using hq-go-errors for better debugging and traceability, except when the private key does not
-// implement crypto.Signer, where a simple error is returned.
+// and to be one of the supported types (RSA, ECDSA, or Ed25519).
 //
 // Parameters:
-//   - CACertificateFilePath (string): The file path to the PEM-encoded CA certificate.
-//   - CAPrivateKeyFilePath (string): The file path to the PEM-encoded private key.
+//   - certificateFilePath (string): The file path to the PEM-encoded certificate.
+//   - certificatePrivateKeyFilePath (string): The file path to the PEM-encoded private key.
 //
 // Returns:
-//   - CACertificate (*x509.Certificate): A pointer to the loaded X.509 CA certificate.
-//   - CAPrivateKey (crypto.Signer): The loaded private key, implementing the crypto.Signer interface.
+//   - certificate (*x509.Certificate): A pointer to the loaded X.509 certificate.
+//   - certificatePrivateKey (crypto.Signer): The loaded private key, implementing the crypto.Signer interface.
 //   - err (error): An error with stack trace and metadata if loading, parsing, or type assertion fails; otherwise, nil.
-func LoadCACertificatePrivateKeyFromFiles(CACertificateFilePath, CAPrivateKeyFilePath string) (CACertificate *x509.Certificate, CAPrivateKey crypto.Signer, err error) {
-	tlsCA, err := tls.LoadX509KeyPair(CACertificateFilePath, CAPrivateKeyFilePath)
+func LoadCertificatePrivateKeyFromFiles(certificateFilePath, certificatePrivateKeyFilePath string) (certificate *x509.Certificate, certificatePrivateKey crypto.Signer, err error) {
+	tlsCA, err := tls.LoadX509KeyPair(certificateFilePath, certificatePrivateKeyFilePath)
 	if err != nil {
-		err = fmt.Errorf("failed to load CA certificate and private key: %w", err)
+		err = fmt.Errorf("failed to load certificate and private key: %w", err)
 
 		return
 	}
 
-	CACertificate, err = x509.ParseCertificate(tlsCA.Certificate[0])
+	certificate, err = x509.ParseCertificate(tlsCA.Certificate[0])
 	if err != nil {
-		err = fmt.Errorf("failed to parse CA certificate: %w", err)
+		err = fmt.Errorf("failed to parse certificate: %w", err)
 
 		return
 	}
 
-	CAPrivateKey, ok := tlsCA.PrivateKey.(crypto.Signer)
-	if !ok {
-		err = errors.New("CA private key does not implement crypto.Signer")
-
-		return
-	}
-
-	switch CAPrivateKey.(type) {
+	switch certificatePrivateKey.(type) {
 	case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
 	default:
-		err = fmt.Errorf("unsupported private key type: %T", CAPrivateKey)
+		err = fmt.Errorf("unsupported private key type: %T", certificatePrivateKey)
 
 		return
 	}
@@ -68,18 +58,17 @@ func LoadCACertificatePrivateKeyFromFiles(CACertificateFilePath, CAPrivateKeyFil
 // The directory for the certificate file is created with permissions 0755 if it does not exist. Files are
 // written with restrictive permissions (0600) to ensure security for sensitive data. The private key must
 // implement the crypto.Signer interface and be one of the supported types (RSA, ECDSA, or Ed25519).
-// Errors are wrapped with context and metadata using hq-go-errors for improved debugging and traceability.
 //
 // Parameters:
 //   - certificate (*x509.Certificate): A pointer to the X.509 certificate to save.
 //   - certificateFilePath (string): The file path where the certificate will be saved in PEM format.
-//   - key (crypto.Signer): The private key to save, implementing the crypto.Signer interface.
-//   - keyFilePath (string): The file path where the private key will be saved in PEM format.
+//   - certificatePrivateKey (crypto.Signer): The private key to save, implementing the crypto.Signer interface.
+//   - certificatePrivateKeyFilePath (string): The file path where the private key will be saved in PEM format.
 //
 // Returns:
 //   - err (error): An error with stack trace and metadata if directory creation, PEM conversion, or file writing
 //     fails; otherwise, nil.
-func SaveCertificatePrivateKeyToFiles(certificate *x509.Certificate, certificateFilePath string, key crypto.Signer, keyFilePath string) (err error) {
+func SaveCertificatePrivateKeyToFiles(certificate *x509.Certificate, certificateFilePath string, certificatePrivateKey crypto.Signer, certificatePrivateKeyFilePath string) (err error) {
 	certificateFilePathDirectory := filepath.Dir(certificateFilePath)
 
 	if err = mkdir(certificateFilePathDirectory); err != nil {
@@ -105,14 +94,14 @@ func SaveCertificatePrivateKeyToFiles(certificate *x509.Certificate, certificate
 
 	var keyBytes []byte
 
-	keyBytes, err = PrivateKeyToPEM(key)
+	keyBytes, err = PrivateKeyToPEM(certificatePrivateKey)
 	if err != nil {
 		err = fmt.Errorf("failed to convert private key to PEM: %w", err)
 
 		return
 	}
 
-	if err = writeToFile(keyBytes, keyFilePath); err != nil {
+	if err = writeToFile(keyBytes, certificatePrivateKeyFilePath); err != nil {
 		err = fmt.Errorf("failed to write private key to file: %w", err)
 
 		return
@@ -124,8 +113,7 @@ func SaveCertificatePrivateKeyToFiles(certificate *x509.Certificate, certificate
 // mkdir creates a directory at the specified path if it does not exist.
 //
 // The directory is created with permissions 0755 (rwxr-xr-x), suitable for directories containing
-// certificate files. If the directory already exists, no action is taken. Errors are wrapped with
-// context and metadata using hq-go-errors for better traceability.
+// certificate files. If the directory already exists, no action is taken.
 //
 // Parameters:
 //   - path (string): The file system path for the directory to create.
@@ -147,7 +135,7 @@ func mkdir(path string) (err error) {
 // writeToFile writes the content of a byte slice to a file with restrictive permissions.
 //
 // The file is written with permissions 0600 (rw-------) to ensure security for sensitive data like
-// certificates and private keys. Errors are wrapped with context and metadata using hq-go-errors.
+// certificates and private keys.
 //
 // Parameters:
 //   - content ([]byte): A byte slice containing the data to write.

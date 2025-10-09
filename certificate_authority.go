@@ -83,8 +83,7 @@ type CertificateAuthority struct {
 // This method creates a private key (matching the CA's key type: RSA, ECDSA, or Ed25519) and a TLS certificate signed by the CA,
 // based on the provided configuration options and hostnames. The certificate includes a random serial number, a subject key identifier (SKI),
 // and supports key encipherment and digital signatures for server authentication. Hostnames are parsed to determine if they represent
-// IP addresses, email addresses, URIs, or DNS names, and are added to the appropriate certificate fields. Errors are wrapped with context
-// and metadata using hq-go-errors.
+// IP addresses, email addresses, URIs, or DNS names, and are added to the appropriate certificate fields.
 //
 // Parameters:
 //   - hosts ([]string): A slice of hostnames (e.g., DNS names, IPs, emails, or URIs) to include in the certificate.
@@ -235,8 +234,7 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 //
 // The returned function is used as the GetCertificate callback in a tls.Config. It generates or retrieves a cached
 // TLS certificate for the provided server name (from SNI) with a short validity period (24 hours). Certificates are
-// cached to improve performance, with expiration based on cacheMaxAge. If the server name is missing, an error is returned.
-// Errors are wrapped with context and metadata using hq-go-errors for better traceability.
+// cached to improve performance, with expiration based on cacheMaxAge.
 //
 // Returns:
 //   - (func(*tls.ClientHelloInfo) (*tls.Certificate, error)): A function that takes a tls.ClientHelloInfo and returns a tls.Certificate and an error.
@@ -415,8 +413,7 @@ func CACertificatePrivateKeyWithValidFor(validFor time.Duration) CACertificatePr
 // This function creates a private key (RSA, ECDSA, or Ed25519 based on configuration) and a self-signed CA certificate
 // using the functional options pattern. The certificate includes a random serial number, a subject key identifier (SKI),
 // and is configured for certificate signing and CRL signing, as per RFC 5280. The validity period starts at ValidFrom
-// (defaulting to the current time) and extends for ValidFor (defaulting to 365 days). Errors are wrapped with context and
-// metadata using hq-go-errors.
+// (defaulting to the current time) and extends for ValidFor (defaulting to 365 days).
 //
 // Parameters:
 //   - ofs (...CACertificatePrivateKeyOptionFunc): A variadic list of CACertificatePrivateKeyOptionFunc functions to configure
@@ -504,7 +501,6 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 // GenerateCACertificatePrivateKeyBytes generates a new X.509 CA certificate and private key, returning them in PEM format.
 //
 // This function wraps GenerateCACertificatePrivateKey and converts the resulting certificate and private key to PEM format.
-// Errors are wrapped with context and metadata using hq-go-errors.
 //
 // Parameters:
 //   - ofs (...CACertificatePrivateKeyOptionFunc): A variadic list of CACertificatePrivateKeyOptionFunc functions to configure
@@ -544,8 +540,7 @@ func GenerateCACertificatePrivateKeyBytes(ofs ...CACertificatePrivateKeyOptionFu
 // CertificateToPEM converts an X.509 certificate to PEM format.
 //
 // The certificate is encoded as a PEM block with type "CERTIFICATE", as per RFC 7468. The resulting PEM data
-// is returned as a byte slice for further use (e.g., writing to a file or network). Errors are wrapped with context
-// and metadata using hq-go-errors, except for nil certificate checks.
+// is returned as a byte slice for further use (e.g., writing to a file or network).
 //
 // Parameters:
 //   - certificate (*x509.Certificate): A pointer to the X.509 certificate to convert.
@@ -574,7 +569,7 @@ func CertificateToPEM(certificate *x509.Certificate) (raw []byte, err error) {
 //
 // The private key is marshaled to the appropriate format (PKCS#1 for RSA, EC for ECDSA, PKCS#8 for Ed25519) and encoded
 // as a PEM block with type "RSA PRIVATE KEY", "EC PRIVATE KEY", or "PRIVATE KEY", as per RFC 7468. The resulting PEM data
-// is returned as a byte slice. Errors are wrapped with context and metadata using hq-go-errors, except for nil key checks.
+// is returned as a byte slice.
 //
 // Parameters:
 //   - key (crypto.Signer): The private key to convert, implementing crypto.Signer.
@@ -687,8 +682,7 @@ func TLSCertificatePrivateKeyWithValidFor(validFor time.Duration) TLSCertificate
 //
 // It verifies that the certificate is configured as a CA and has the necessary key usage for certificate
 // signing. The private key must match the public key type in the certificate (RSA, ECDSA, or Ed25519).
-// The cache is initialized with a default maximum age of 1 hour. Errors are wrapped with context and metadata
-// using hq-go-errors for improved debugging, except for simple validation errors.
+// The cache is initialized with a default maximum age of 1 hour.
 //
 // Parameters:
 //   - CACertificate (*x509.Certificate): A pointer to the X.509 CA certificate.
@@ -759,11 +753,10 @@ func New(CACertificate *x509.Certificate, CAPrivateKey crypto.Signer) (CA *Certi
 	return
 }
 
-// NewFromBytes initializes a new CertificateAuthority from PEM-encoded certificate and private key bytes.
+// NewWithBytesCertificatePrivateKey initializes a new CertificateAuthority from PEM-encoded certificate and private key bytes.
 //
 // It parses the certificate and private key from the provided byte slices, supporting PKCS#1, PKCS#8, and ECDSA private key formats.
-// The parsed certificate and private key are then used to initialize a CertificateAuthority. Errors are wrapped with context and metadata
-// using hq-go-errors for improved debugging, except for simple validation errors.
+// The parsed certificate and private key are then used to initialize a CertificateAuthority.
 //
 // Parameters:
 //   - CACertificateBytes ([]byte): The PEM-encoded CA certificate bytes.
@@ -772,7 +765,7 @@ func New(CACertificate *x509.Certificate, CAPrivateKey crypto.Signer) (CA *Certi
 // Returns:
 //   - CA (*CertificateAuthority): A pointer to the initialized CertificateAuthority.
 //   - err (error): An error with stack trace and metadata if parsing or initialization fails; otherwise, nil.
-func NewFromBytes(CACertificateBytes, CAPrivateKeyBytes []byte) (CA *CertificateAuthority, err error) {
+func NewWithBytesCertificatePrivateKey(CACertificateBytes, CAPrivateKeyBytes []byte) (CA *CertificateAuthority, err error) {
 	var CACertificate *x509.Certificate
 
 	CACertificate, err = x509.ParseCertificate(CACertificateBytes)
@@ -839,8 +832,7 @@ func generateSerialNumber() (serialNumber *big.Int, err error) {
 // generateSubjectKeyID computes a Subject Key Identifier (SKI) from a given public key.
 //
 // The Subject Key Identifier is a SHA-256 hash of the public key's PKIX-encoded form, as specified in RFC 5280,
-// section 4.2.1.2. It is used to uniquely identify a public key in an X.509 certificate. Errors are wrapped with
-// context and metadata using hq-go-errors, except for empty key checks.
+// section 4.2.1.2. It is used to uniquely identify a public key in an X.509 certificate.
 //
 // Parameters:
 //   - publicKey (crypto.PublicKey): The cryptographic public key (e.g., *rsa.PublicKey) to generate the SKI for.
