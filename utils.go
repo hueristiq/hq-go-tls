@@ -1,99 +1,85 @@
 package tls
 
 import (
-	"bytes"
 	"crypto"
-	"crypto/rand"
+	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
-	"crypto/sha1"
+	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"path/filepath"
 )
 
-// generateSerialNumber creates a random serial number for use in X.509 certificates.
+// LoadCACertificatePrivateKeyFromFiles loads a CA certificate and private key from the specified PEM-encoded files.
 //
-// Serial numbers are unique identifiers for certificates, as required by the X.509 standard (RFC 5280).
-// This function generates a cryptographically secure random number with a maximum bit length of 128 bits,
-// ensuring compliance with common certificate authority requirements. If the generated number is zero,
-// it defaults to 1 to avoid invalid serial numbers, as zero is not a valid serial number per X.509.
-//
-// Returns:
-//   - serialNumber (*big.Int): A pointer to a big.Int representing the generated serial number.
-//   - err (error): An error with stack trace and metadata if random number generation fails; otherwise, nil.
-func generateSerialNumber() (serialNumber *big.Int, err error) {
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-
-	serialNumber, err = rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		err = fmt.Errorf("failed to generate random serial number: %w", err)
-
-		return
-	}
-
-	if serialNumber.Sign() == 0 {
-		serialNumber = big.NewInt(1)
-	}
-
-	return
-}
-
-// generateSubjectKeyID computes a Subject Key Identifier (SKI) from a given public key.
-//
-// The Subject Key Identifier is a SHA-1 hash of the public key's PKIX-encoded form, as specified in
-// RFC 5280, section 4.2.1.2. It is used to uniquely identify a public key in an X.509 certificate.
-// The public key is marshaled to PKIX format before hashing. If marshaling fails or the key is empty,
-// an error is returned with appropriate context.
+// The certificate and private key are loaded using the crypto/tls package. The certificate is parsed to ensure
+// it is a valid X.509 certificate, and the private key is verified to implement the crypto.Signer interface
+// and to be one of the supported types (RSA, ECDSA, or Ed25519). Errors are wrapped with context, error types,
+// and metadata using hq-go-errors for better debugging and traceability, except when the private key does not
+// implement crypto.Signer, where a simple error is returned.
 //
 // Parameters:
-//   - publicKey (crypto.PublicKey): The cryptographic public key (e.g., *rsa.PublicKey) to generate the SKI for.
+//   - CACertificateFilePath (string): The file path to the PEM-encoded CA certificate.
+//   - CAPrivateKeyFilePath (string): The file path to the PEM-encoded private key.
 //
 // Returns:
-//   - SKI ([]byte): A byte slice containing the SHA-1 hash of the marshaled public key.
-//   - err (error): An error with stack trace and metadata if public key marshaling fails or the key is empty;
-//     otherwise, nil.
-func generateSubjectKeyID(publicKey crypto.PublicKey) (SKI []byte, err error) {
-	pkixPub, err := x509.MarshalPKIXPublicKey(publicKey)
+//   - CACertificate (*x509.Certificate): A pointer to the loaded X.509 CA certificate.
+//   - CAPrivateKey (crypto.Signer): The loaded private key, implementing the crypto.Signer interface.
+//   - err (error): An error with stack trace and metadata if loading, parsing, or type assertion fails; otherwise, nil.
+func LoadCACertificatePrivateKeyFromFiles(CACertificateFilePath, CAPrivateKeyFilePath string) (CACertificate *x509.Certificate, CAPrivateKey crypto.Signer, err error) {
+	tlsCA, err := tls.LoadX509KeyPair(CACertificateFilePath, CAPrivateKeyFilePath)
 	if err != nil {
-		err = fmt.Errorf("failed to marshal public key to PKIX format: %w", err)
+		err = fmt.Errorf("failed to load CA certificate and private key: %w", err)
 
 		return
 	}
 
-	if len(pkixPub) == 0 {
-		err = errors.New("public key is enpty")
+	CACertificate, err = x509.ParseCertificate(tlsCA.Certificate[0])
+	if err != nil {
+		err = fmt.Errorf("failed to parse CA certificate: %w", err)
 
 		return
 	}
 
-	sum := sha1.Sum(pkixPub)
+	CAPrivateKey, ok := tlsCA.PrivateKey.(crypto.Signer)
+	if !ok {
+		err = errors.New("CA private key does not implement crypto.Signer")
 
-	SKI = sum[:]
+		return
+	}
+
+	switch CAPrivateKey.(type) {
+	case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
+	default:
+		err = fmt.Errorf("unsupported private key type: %T", CAPrivateKey)
+
+		return
+	}
 
 	return
 }
 
-// SaveCertificatePrivateKey saves a certificate and its private key to the specified files in PEM format.
+// SaveCertificatePrivateKeyToFiles saves a certificate and its private key to the specified files in PEM format.
 //
 // The certificate and private key are converted to PEM format and written to the provided file paths.
 // The directory for the certificate file is created with permissions 0755 if it does not exist. Files are
-// written with restrictive permissions (0600) to ensure security for sensitive data. Errors are wrapped
-// with context and metadata using hq-go-errors for improved debugging and traceability.
+// written with restrictive permissions (0600) to ensure security for sensitive data. The private key must
+// implement the crypto.Signer interface and be one of the supported types (RSA, ECDSA, or Ed25519).
+// Errors are wrapped with context and metadata using hq-go-errors for improved debugging and traceability.
 //
 // Parameters:
 //   - certificate (*x509.Certificate): A pointer to the X.509 certificate to save.
 //   - certificateFilePath (string): The file path where the certificate will be saved in PEM format.
-//   - certificatePrivateKey (*rsa.PrivateKey): A pointer to the RSA private key to save.
-//   - certificatePrivKeyFilePath (string): The file path where the private key will be saved in PEM format.
+//   - key (crypto.Signer): The private key to save, implementing the crypto.Signer interface.
+//   - keyFilePath (string): The file path where the private key will be saved in PEM format.
 //
 // Returns:
 //   - err (error): An error with stack trace and metadata if directory creation, PEM conversion, or file writing
 //     fails; otherwise, nil.
-func SaveCertificatePrivateKey(certificate *x509.Certificate, certificateFilePath string, certificatePrivateKey *rsa.PrivateKey, certificatePrivKeyFilePath string) (err error) {
+func SaveCertificatePrivateKeyToFiles(certificate *x509.Certificate, certificateFilePath string, key crypto.Signer, keyFilePath string) (err error) {
 	certificateFilePathDirectory := filepath.Dir(certificateFilePath)
 
 	if err = mkdir(certificateFilePathDirectory); err != nil {
@@ -102,89 +88,32 @@ func SaveCertificatePrivateKey(certificate *x509.Certificate, certificateFilePat
 		return
 	}
 
-	var certificateContent *bytes.Buffer
+	var certificateBytes []byte
 
-	certificateContent, err = CertificateToPEM(certificate)
+	certificateBytes, err = CertificateToPEM(certificate)
 	if err != nil {
 		err = fmt.Errorf("failed to convert certificate to PEM: %w", err)
 
 		return
 	}
 
-	if err = writeToFile(certificateContent, certificateFilePath); err != nil {
+	if err = writeToFile(certificateBytes, certificateFilePath); err != nil {
 		err = fmt.Errorf("failed to write certificate to file: %w", err)
 
 		return
 	}
 
-	var privKeyContent *bytes.Buffer
+	var keyBytes []byte
 
-	privKeyContent, err = PrivateKeyToPEM(certificatePrivateKey)
+	keyBytes, err = PrivateKeyToPEM(key)
 	if err != nil {
 		err = fmt.Errorf("failed to convert private key to PEM: %w", err)
 
 		return
 	}
 
-	if err = writeToFile(privKeyContent, certificatePrivKeyFilePath); err != nil {
+	if err = writeToFile(keyBytes, keyFilePath); err != nil {
 		err = fmt.Errorf("failed to write private key to file: %w", err)
-
-		return
-	}
-
-	return
-}
-
-// CertificateToPEM converts an X.509 certificate to PEM format.
-//
-// The certificate is encoded as a PEM block with type "CERTIFICATE", as per RFC 7468. The resulting
-// PEM data is written to a bytes.Buffer for further use (e.g., writing to a file or network). Errors
-// are wrapped with context and metadata using hq-go-errors.
-//
-// Parameters:
-//   - certificate (*x509.Certificate): A pointer to the X.509 certificate to convert.
-//
-// Returns:
-//   - raw (*bytes.Buffer): A bytes.Buffer containing the PEM-encoded certificate.
-//   - err (error): An error with stack trace and metadata if PEM encoding fails; otherwise, nil.
-func CertificateToPEM(certificate *x509.Certificate) (raw *bytes.Buffer, err error) {
-	raw = new(bytes.Buffer)
-
-	if err = pem.Encode(raw, &pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}); err != nil {
-		err = fmt.Errorf("failed to encode certificate to PEM: %w", err)
-
-		return
-	}
-
-	return
-}
-
-// PrivateKeyToPEM converts an RSA private key to PEM format.
-//
-// The private key is marshaled to PKCS#8 format (per RFC 5208) and encoded as a PEM block with type
-// "PRIVATE KEY", as per RFC 7468. The resulting PEM data is written to a bytes.Buffer. Errors are
-// wrapped with context and metadata using hq-go-errors.
-//
-// Parameters:
-//   - certificatePrivateKey (*rsa.PrivateKey): A pointer to the RSA private key to convert.
-//
-// Returns:
-//   - raw (*bytes.Buffer): A bytes.Buffer containing the PEM-encoded private key.
-//   - err (error): An error with stack trace and metadata if marshaling or PEM encoding fails; otherwise, nil.
-func PrivateKeyToPEM(certificatePrivateKey *rsa.PrivateKey) (raw *bytes.Buffer, err error) {
-	raw = new(bytes.Buffer)
-
-	var certificatePrivateKeyBytes []byte
-
-	certificatePrivateKeyBytes, err = x509.MarshalPKCS8PrivateKey(certificatePrivateKey)
-	if err != nil {
-		err = fmt.Errorf("failed to marshal private key to PKCS#8: %w", err)
-
-		return
-	}
-
-	if err = pem.Encode(raw, &pem.Block{Type: "PRIVATE KEY", Bytes: certificatePrivateKeyBytes}); err != nil {
-		err = fmt.Errorf("failed to encode private key to PEM: %w", err)
 
 		return
 	}
@@ -204,8 +133,7 @@ func PrivateKeyToPEM(certificatePrivateKey *rsa.PrivateKey) (raw *bytes.Buffer, 
 // Returns:
 //   - err (error): An error with stack trace and metadata if directory creation fails; otherwise, nil.
 func mkdir(path string) (err error) {
-	_, err = os.Stat(path)
-	if os.IsNotExist(err) {
+	if _, err = os.Stat(path); os.IsNotExist(err) {
 		if err = os.MkdirAll(path, 0o755); err != nil {
 			err = fmt.Errorf("failed to create directory: %w", err)
 
@@ -216,19 +144,19 @@ func mkdir(path string) (err error) {
 	return
 }
 
-// writeToFile writes the content of a bytes.Buffer to a file with restrictive permissions.
+// writeToFile writes the content of a byte slice to a file with restrictive permissions.
 //
 // The file is written with permissions 0600 (rw-------) to ensure security for sensitive data like
 // certificates and private keys. Errors are wrapped with context and metadata using hq-go-errors.
 //
 // Parameters:
-//   - content (*bytes.Buffer): A bytes.Buffer containing the data to write.
+//   - content ([]byte): A byte slice containing the data to write.
 //   - path (string): The file path where the content will be written.
 //
 // Returns:
 //   - err (error): An error with stack trace and metadata if file writing fails; otherwise, nil.
-func writeToFile(content *bytes.Buffer, path string) (err error) {
-	if err = os.WriteFile(path, content.Bytes(), 0o600); err != nil {
+func writeToFile(content []byte, path string) (err error) {
+	if err = os.WriteFile(path, content, 0o600); err != nil {
 		err = fmt.Errorf("failed to write to file: %w", err)
 	}
 
