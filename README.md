@@ -67,12 +67,12 @@ func main() {
 }
 ```
 
-### Loading a CA Certificate
+### Loading a Certificate
 
-Load a CA certificate and private key from PEM files using `LoadCACertificatePrivateKeyFromFiles`.
+Load a certificate and private key from PEM files using `LoadCertificatePrivateKeyFromFiles`.
 
 ```go
-caCert, caKey, err := hqgotls.LoadCACertificatePrivateKeyFromFiles("ca-cert.pem", "ca-key.pem")
+caCert, caKey, err := hqgotls.LoadCertificatePrivateKeyFromFiles("ca-cert.pem", "ca-key.pem")
 if err != nil {
 	log.Fatal(err)
 }
@@ -91,7 +91,7 @@ import (
 )
 
 func main() {
-	caCert, caKey, err := hqgotls.LoadCACertificatePrivateKeyFromFiles("ca-cert.pem", "ca-key.pem")
+	caCert, caKey, err := hqgotls.LoadCertificatePrivateKeyFromFiles("ca-cert.pem", "ca-key.pem")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -110,7 +110,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Save to files
 	err = tls.SaveCertificatePrivateKeyToFiles(tlsCert, "tls-cert.pem", tlsKey, "tls-key.pem")
 	if err != nil {
 		log.Fatal(err)
@@ -134,7 +133,6 @@ import (
 )
 
 func main() {
-	// Generate and initialize CA
 	caCert, caKey, err := hqgotls.GenerateCACertificatePrivateKey()
 	if err != nil {
 		log.Fatal(err)
@@ -144,10 +142,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create TLS config
 	tlsConfig := ca.NewTLSConfig()
 
-	// Set up HTTP server
 	server := &http.Server{
 		Addr:      ":443",
 		TLSConfig: tlsConfig,
