@@ -60,7 +60,7 @@ func main() {
 	}
 
 	// Save to files
-	err = hqgotls.SaveCertificatePrivateKey(caCert, "ca-cert.pem", caKey, "ca-key.pem")
+	err = hqgotls.SaveCertificatePrivateKeyToFiles(caCert, "ca-cert.pem", caKey, "ca-key.pem")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -69,10 +69,10 @@ func main() {
 
 ### Loading a CA Certificate
 
-Load a CA certificate and private key from PEM files using `LoadCACertificatePrivateKey`.
+Load a CA certificate and private key from PEM files using `LoadCACertificatePrivateKeyFromFiles`.
 
 ```go
-caCert, caKey, err := hqgotls.LoadCACertificatePrivateKey("ca-cert.pem", "ca-key.pem")
+caCert, caKey, err := hqgotls.LoadCACertificatePrivateKeyFromFiles("ca-cert.pem", "ca-key.pem")
 if err != nil {
 	log.Fatal(err)
 }
@@ -91,7 +91,7 @@ import (
 )
 
 func main() {
-	caCert, caKey, err := hqgotls.LoadCACertificatePrivateKey("ca-cert.pem", "ca-key.pem")
+	caCert, caKey, err := hqgotls.LoadCACertificatePrivateKeyFromFiles("ca-cert.pem", "ca-key.pem")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func main() {
 	}
 
 	// Save to files
-	err = tls.SaveCertificatePrivateKey(tlsCert, "tls-cert.pem", tlsKey, "tls-key.pem")
+	err = tls.SaveCertificatePrivateKeyToFiles(tlsCert, "tls-cert.pem", tlsKey, "tls-key.pem")
 	if err != nil {
 		log.Fatal(err)
 	}
