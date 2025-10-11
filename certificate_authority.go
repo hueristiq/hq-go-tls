@@ -96,6 +96,18 @@ type CertificateAuthority struct {
 //   - err (error): An error with stack trace and metadata if key generation, SKI generation, serial number generation,
 //     certificate creation, or parsing fails; otherwise, nil.
 func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TLSCertificatePrivateKeyOptionFunc) (TLSCertificate *x509.Certificate, TLSPrivateKey crypto.Signer, err error) {
+	if CA == nil {
+		err = errors.New("invalid input, CertificateAuthority is nil")
+
+		return
+	}
+
+	if len(hosts) == 0 {
+		err = errors.New("invalid input, hosts list is empty")
+
+		return
+	}
+
 	opts := &_TLSCertificatePrivateKeyOptions{
 		CommonName: "Acme CA",
 		Organization: []string{
@@ -109,9 +121,26 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 		f(opts)
 	}
 
+	if opts.CommonName == "" {
+		err = errors.New("invalid input, CommonName is empty")
+
+		return
+	}
+
+	if opts.ValidFor <= 0 {
+		err = fmt.Errorf("invalid input, ValidFor duration must be positive, got %v", opts.ValidFor)
+
+		return
+	}
+
 	switch caKey := CA._CAPrivateKey.(type) {
 	case *rsa.PrivateKey:
 		TLSPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			err = fmt.Errorf("failed to generate RSA private key (2048 bits): %w", err)
+
+			return
+		}
 	case *ecdsa.PrivateKey:
 		curve := caKey.Curve
 		if curve == nil {
@@ -119,14 +148,20 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 		}
 
 		TLSPrivateKey, err = ecdsa.GenerateKey(curve, rand.Reader)
+		if err != nil {
+			err = fmt.Errorf("failed to generate ECDSA private key (curve %v): %w", curve, err)
+
+			return
+		}
 	case ed25519.PrivateKey:
 		_, TLSPrivateKey, err = ed25519.GenerateKey(rand.Reader)
-	default:
-		TLSPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
-	}
+		if err != nil {
+			err = fmt.Errorf("failed to generate Ed25519 private key: %w", err)
 
-	if err != nil {
-		err = fmt.Errorf("failed to generate RSA private key: %w", err)
+			return
+		}
+	default:
+		err = fmt.Errorf("unsupported CA private key type: %T", caKey)
 
 		return
 	}
@@ -137,7 +172,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	serialNumber, err = generateSerialNumber()
 	if err != nil {
-		err = fmt.Errorf("failed to generate serial: %w", err)
+		err = fmt.Errorf("failed to generate serial number for certificate: %w", err)
 
 		return
 	}
@@ -146,7 +181,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	TLSPrivateKeySKI, err = generateSubjectKeyID(TLSPublicKey)
 	if err != nil {
-		err = fmt.Errorf("failed to generate subject key ID: %w", err)
+		err = fmt.Errorf("failed to generate subject key ID for public key (type %T): %w", TLSPublicKey, err)
 
 		return
 	}
@@ -167,6 +202,12 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 	}
 
 	for _, host := range hosts {
+		if host == "" {
+			err = errors.New("invalid input, empty hostname in hosts list")
+
+			return
+		}
+
 		if IP := net.ParseIP(host); IP != nil {
 			template.IPAddresses = append(template.IPAddresses, IP)
 		} else if email, err := mail.ParseAddress(host); err == nil && email.Address == host {
@@ -182,14 +223,14 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	TLSCertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, CA._CACertificate, TLSPublicKey, CA._CAPrivateKey)
 	if err != nil {
-		err = fmt.Errorf("failed to create certificate: %w", err)
+		err = fmt.Errorf("failed to create TLS certificate for hosts %v: %w", hosts, err)
 
 		return
 	}
 
 	TLSCertificate, err = x509.ParseCertificate(TLSCertificateInBytes)
 	if err != nil {
-		err = fmt.Errorf("failed to parse certificate: %w", err)
+		err = fmt.Errorf("failed to parse generated TLS certificate: %w", err)
 
 		return
 	}
@@ -206,6 +247,14 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 // Returns:
 //   - cfg (*tls.Config): A pointer to a tls.Config with a dynamic certificate generation function.
 func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
+	cfg = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	if CA == nil {
+		return
+	}
+
 	cfg = &tls.Config{
 		CipherSuites: []uint16{
 			tls.TLS_AES_128_GCM_SHA256,
@@ -241,8 +290,14 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 //     The error includes stack trace and metadata if certificate generation fails or SNI is missing.
 func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(hello *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
+		if hello == nil {
+			err = errors.New("invalid input, ClientHelloInfo is nil")
+
+			return
+		}
+
 		if hello.ServerName == "" {
-			err = errors.New("missing server name (SNI)")
+			err = errors.New("invalid input, missing server name (SNI)")
 
 			return
 		}
@@ -278,7 +333,7 @@ func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInf
 
 		TLSCertificate, TLSPrivateKey, err = CA.GenerateTLSCertificate([]string{host}, TLSCertificatePrivateKeyWithValidFor(24*time.Hour))
 		if err != nil {
-			err = fmt.Errorf("failed to generate certificate: %w", err)
+			err = fmt.Errorf("failed to generate TLS certificate for host '%s': %w", host, err)
 
 			return
 		}
@@ -341,7 +396,7 @@ func (CA *CertificateAuthority) clearOldCacheEntries() {
 //   - CommonName (string): Common Name (CN) for the certificate's subject, typically the CA's name (e.g., "Acme CA").
 //   - Organization ([]string): Organization names included in the certificate's subject (e.g., ["Acme Co"]).
 //   - ValidFrom (time.Time): The start time from which the certificate is valid. Defaults to the current time if not set.
-//   - ValidFor (time.Duration): The duration for which the certificate is valid from ValidFrom (e.g., 365 days)
+//   - ValidFor (time.Duration): The duration for which the certificate is valid from ValidFrom (e.g., 365 days).
 type _TLSCertificatePrivateKeyOptions struct {
 	CommonName   string
 	Organization []string
@@ -438,9 +493,21 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 		f(opts)
 	}
 
+	if opts.CommonName == "" {
+		err = errors.New("invalid input, CommonName is empty")
+
+		return
+	}
+
+	if opts.ValidFor <= 0 {
+		err = fmt.Errorf("invalid input, ValidFor duration must be positive, got %v", opts.ValidFor)
+
+		return
+	}
+
 	CAPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		err = fmt.Errorf("failed to generate RSA private key: %w", err)
+		err = fmt.Errorf("failed to generate RSA private key (2048 bits): %w", err)
 
 		return
 	}
@@ -451,7 +518,7 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 
 	serialNumber, err = generateSerialNumber()
 	if err != nil {
-		err = fmt.Errorf("failed to generate serial number: %w", err)
+		err = fmt.Errorf("failed to generate serial number for CA certificate: %w", err)
 
 		return
 	}
@@ -460,7 +527,7 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 
 	CAPrivateKeySKI, err = generateSubjectKeyID(CAPublicKey)
 	if err != nil {
-		err = fmt.Errorf("failed to generate subject key ID: %w", err)
+		err = fmt.Errorf("failed to generate subject key ID for public key (type %T): %w", CAPublicKey, err)
 
 		return
 	}
@@ -483,14 +550,14 @@ func GenerateCACertificatePrivateKey(ofs ...CACertificatePrivateKeyOptionFunc) (
 
 	CACertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, template, CAPublicKey, CAPrivateKey)
 	if err != nil {
-		err = fmt.Errorf("failed to create CA certificate: %w", err)
+		err = fmt.Errorf("failed to create self-signed CA certificate: %w", err)
 
 		return
 	}
 
 	CACertificate, err = x509.ParseCertificate(CACertificateInBytes)
 	if err != nil {
-		err = fmt.Errorf("failed to parse CA certificate: %w", err)
+		err = fmt.Errorf("failed to parse generated CA certificate: %w", err)
 
 		return
 	}
@@ -517,19 +584,21 @@ func GenerateCACertificatePrivateKeyBytes(ofs ...CACertificatePrivateKeyOptionFu
 
 	CACertificate, CAPrivateKey, err = GenerateCACertificatePrivateKey(ofs...)
 	if err != nil {
+		err = fmt.Errorf("failed to generate CA certificate and private key: %w", err)
+
 		return
 	}
 
 	CACertificateBytes, err = CertificateToPEM(CACertificate)
 	if err != nil {
-		err = fmt.Errorf("failed to convert certificate to PEM: %w", err)
+		err = fmt.Errorf("failed to convert CA certificate to PEM format: %w", err)
 
 		return
 	}
 
 	CAPrivateKeyBytes, err = PrivateKeyToPEM(CAPrivateKey)
 	if err != nil {
-		err = fmt.Errorf("failed to convert private key to PEM: %w", err)
+		err = fmt.Errorf("failed to convert CA private key to PEM format (type %T): %w", CAPrivateKey, err)
 
 		return
 	}
@@ -550,7 +619,13 @@ func GenerateCACertificatePrivateKeyBytes(ofs ...CACertificatePrivateKeyOptionFu
 //   - err (error): An error with stack trace and metadata if PEM encoding fails or the certificate is nil; otherwise, nil.
 func CertificateToPEM(certificate *x509.Certificate) (raw []byte, err error) {
 	if certificate == nil {
-		err = errors.New("certificate is nil")
+		err = errors.New("invalid input, certificate is nil")
+
+		return
+	}
+
+	if len(certificate.Raw) == 0 {
+		err = errors.New("invalid input, certificate raw data is empty")
 
 		return
 	}
@@ -560,7 +635,11 @@ func CertificateToPEM(certificate *x509.Certificate) (raw []byte, err error) {
 		Bytes: certificate.Raw,
 	}
 
-	raw = pem.EncodeToMemory(block)
+	if raw = pem.EncodeToMemory(block); raw == nil {
+		err = errors.New("failed to encode certificate to PEM format")
+
+		return
+	}
 
 	return
 }
@@ -579,7 +658,7 @@ func CertificateToPEM(certificate *x509.Certificate) (raw []byte, err error) {
 //   - err (error): An error with stack trace and metadata if marshaling or PEM encoding fails, or if the key is nil or unsupported; otherwise, nil.
 func PrivateKeyToPEM(key crypto.Signer) (raw []byte, err error) {
 	if key == nil {
-		err = errors.New("private key is nil")
+		err = errors.New("invalid input, private key is nil")
 
 		return
 	}
@@ -591,7 +670,13 @@ func PrivateKeyToPEM(key crypto.Signer) (raw []byte, err error) {
 	switch k := key.(type) {
 	case *rsa.PrivateKey:
 		blockType = "RSA PRIVATE KEY"
+
 		keyBytes = x509.MarshalPKCS1PrivateKey(k)
+		if keyBytes == nil {
+			err = errors.New("failed to marshal RSA private key, empty result")
+
+			return
+		}
 	case *ecdsa.PrivateKey:
 		blockType = "EC PRIVATE KEY"
 
@@ -621,7 +706,11 @@ func PrivateKeyToPEM(key crypto.Signer) (raw []byte, err error) {
 		Bytes: keyBytes,
 	}
 
-	raw = pem.EncodeToMemory(block)
+	if raw = pem.EncodeToMemory(block); raw == nil {
+		err = fmt.Errorf("failed to encode private key to PEM format (type %s)", blockType)
+
+		return
+	}
 
 	return
 }
@@ -693,50 +782,50 @@ func TLSCertificatePrivateKeyWithValidFor(validFor time.Duration) TLSCertificate
 //   - err (error): An error with stack trace and metadata if the CA certificate or private key is invalid or incompatible; otherwise, nil.
 func New(CACertificate *x509.Certificate, CAPrivateKey crypto.Signer) (CA *CertificateAuthority, err error) {
 	if CACertificate == nil {
-		err = errors.New("certificate is nil")
+		err = errors.New("invalid input, CA certificate is nil")
 
 		return
 	}
 
 	if !CACertificate.IsCA {
-		err = errors.New("certificate is not CA")
+		err = errors.New("invalid input, certificate is not configured as a CA (IsCA is false)")
 
 		return
 	}
 
 	if (CACertificate.KeyUsage & x509.KeyUsageCertSign) == 0 {
-		err = errors.New("CA certificate missing certSign key usage")
+		err = errors.New("invalid input, CA certificate lacks KeyUsageCertSign")
 
 		return
 	}
 
 	if CAPrivateKey == nil {
-		err = errors.New("private key is nil")
+		err = errors.New("invalid input, CA private key is nil")
 
 		return
 	}
 
-	switch CACertificate.PublicKey.(type) {
+	switch pubKey := CACertificate.PublicKey.(type) {
 	case *rsa.PublicKey:
 		if _, ok := CAPrivateKey.(*rsa.PrivateKey); !ok {
-			err = errors.New("certificate public key is RSA but private key is not")
+			err = fmt.Errorf("invalid input, certificate public key is RSA, but private key is %T", CAPrivateKey)
 
 			return
 		}
 	case *ecdsa.PublicKey:
 		if _, ok := CAPrivateKey.(*ecdsa.PrivateKey); !ok {
-			err = errors.New("certificate public key is ECDSA but private key is not")
+			err = fmt.Errorf("invalid input, certificate public key is ECDSA, but private key is %T", CAPrivateKey)
 
 			return
 		}
 	case ed25519.PublicKey:
 		if _, ok := CAPrivateKey.(ed25519.PrivateKey); !ok {
-			err = errors.New("certificate public key is Ed25519 but private key is not")
+			err = fmt.Errorf("invalid input, certificate public key is Ed25519, but private key is %T", CAPrivateKey)
 
 			return
 		}
 	default:
-		err = errors.New("unsupported certificate public key type")
+		err = fmt.Errorf("unsupported certificate public key type: %T", pubKey)
 
 		return
 	}
@@ -766,36 +855,92 @@ func New(CACertificate *x509.Certificate, CAPrivateKey crypto.Signer) (CA *Certi
 //   - CA (*CertificateAuthority): A pointer to the initialized CertificateAuthority.
 //   - err (error): An error with stack trace and metadata if parsing or initialization fails; otherwise, nil.
 func NewWithBytesCertificatePrivateKey(CACertificateBytes, CAPrivateKeyBytes []byte) (CA *CertificateAuthority, err error) {
+	if len(CACertificateBytes) == 0 {
+		err = errors.New("invalid input, CA certificate bytes are empty")
+
+		return
+	}
+
+	if len(CAPrivateKeyBytes) == 0 {
+		err = errors.New("invalid input, CA private key bytes are empty")
+
+		return
+	}
+
+	certBlock, _ := pem.Decode(CACertificateBytes)
+	if certBlock == nil {
+		err = errors.New("failed to decode PEM block for CA certificate, invalid or malformed PEM data")
+
+		return
+	}
+
+	if certBlock.Type != "CERTIFICATE" {
+		err = fmt.Errorf("invalid PEM block type for CA certificate: got '%s', expected 'CERTIFICATE'", certBlock.Type)
+
+		return
+	}
+
 	var CACertificate *x509.Certificate
 
-	CACertificate, err = x509.ParseCertificate(CACertificateBytes)
+	CACertificate, err = x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
-		err = fmt.Errorf("failed to parse certificate: %w", err)
+		err = fmt.Errorf("failed to parse X.509 certificate from PEM data: %w", err)
+
+		return
+	}
+
+	keyBlock, _ := pem.Decode(CAPrivateKeyBytes)
+	if keyBlock == nil {
+		err = errors.New("failed to decode PEM block for private key, invalid or malformed PEM data")
 
 		return
 	}
 
 	var CAPrivateKey crypto.Signer
 
-	if key, errr := x509.ParsePKCS1PrivateKey(CAPrivateKeyBytes); errr == nil {
-		CAPrivateKey = key
-	} else if key, errr := x509.ParsePKCS8PrivateKey(CAPrivateKeyBytes); errr == nil {
-		switch k := key.(type) {
-		case *rsa.PrivateKey:
-			CAPrivateKey = k
-		case *ecdsa.PrivateKey:
-			CAPrivateKey = k
-		case ed25519.PrivateKey:
-			CAPrivateKey = k
-		default:
-			err = fmt.Errorf("unsupported private key type in PKCS8: %T", key)
+	switch keyBlock.Type {
+	case "RSA PRIVATE KEY":
+		var key *rsa.PrivateKey
+
+		key, err = x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+		if err != nil {
+			err = fmt.Errorf("failed to parse RSA private key from PEM data: %w", err)
 
 			return
 		}
-	} else if key, errr := x509.ParseECPrivateKey(CAPrivateKeyBytes); errr == nil {
+
 		CAPrivateKey = key
-	} else {
-		err = fmt.Errorf("failed to parse private key: %w", errr)
+	case "EC PRIVATE KEY":
+		var key *ecdsa.PrivateKey
+
+		key, err = x509.ParseECPrivateKey(keyBlock.Bytes)
+		if err != nil {
+			err = fmt.Errorf("failed to parse ECDSA private key from PEM data: %w", err)
+
+			return
+		}
+
+		CAPrivateKey = key
+	case "PRIVATE KEY":
+		var key any
+
+		key, err = x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+		if err != nil {
+			err = fmt.Errorf("failed to parse PKCS#8 private key from PEM data: %w", err)
+
+			return
+		}
+
+		signer, ok := key.(crypto.Signer)
+		if !ok {
+			err = fmt.Errorf("private key of type %T does not implement crypto.Signer", key)
+
+			return
+		}
+
+		CAPrivateKey = signer
+	default:
+		err = fmt.Errorf("unsupported PEM block type for private key: got '%s', expected 'RSA PRIVATE KEY', 'EC PRIVATE KEY', or 'PRIVATE KEY'", keyBlock.Type)
 
 		return
 	}
@@ -817,7 +962,7 @@ func generateSerialNumber() (serialNumber *big.Int, err error) {
 
 	serialNumber, err = rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
-		err = fmt.Errorf("failed to generate random serial number: %w", err)
+		err = fmt.Errorf("failed to generate random serial number (128-bit): %w", err)
 
 		return
 	}
@@ -841,15 +986,21 @@ func generateSerialNumber() (serialNumber *big.Int, err error) {
 //   - SKI ([]byte): A byte slice containing the SHA-256 hash of the marshaled public key.
 //   - err (error): An error with stack trace and metadata if public key marshaling fails or the key is empty; otherwise, nil.
 func generateSubjectKeyID(publicKey crypto.PublicKey) (SKI []byte, err error) {
+	if publicKey == nil {
+		err = errors.New("invalid input, public key is nil")
+
+		return
+	}
+
 	pkixPub, err := x509.MarshalPKIXPublicKey(publicKey)
 	if err != nil {
-		err = fmt.Errorf("failed to marshal public key to PKIX format: %w", err)
+		err = fmt.Errorf("failed to marshal public key (type %T) to PKIX format: %w", publicKey, err)
 
 		return
 	}
 
 	if len(pkixPub) == 0 {
-		err = errors.New("public key is empty")
+		err = fmt.Errorf("invalid public key (type %T), marshaled PKIX data is empty", publicKey)
 
 		return
 	}

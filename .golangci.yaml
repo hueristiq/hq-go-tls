@@ -126,6 +126,10 @@ linters:
             multi-if: true
             multi-func: true
 
+    exclusions:
+        paths:
+            - examples
+
 issues:
     whole-files: false
     uniq-by-line: false
