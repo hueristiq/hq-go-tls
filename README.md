@@ -2,7 +2,7 @@
 
 ![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go report card](https://goreportcard.com/badge/github.com/hueristiq/hq-go-tls)](https://goreportcard.com/report/github.com/hueristiq/hq-go-tls) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-go-tls/blob/master/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-go-tls.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-go-tls/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-go-tls.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-go-tls/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-go-tls/blob/master/CONTRIBUTING.md)
 
-`hq-go-tls` is a [Go (Golang)](http://golang.org/) package for for generating, managing, and signing X.509 certificates. It provides a robust API for creating self-signed Certificate Authority (CA) certificates, issuing TLS certificates for various host types, and configuring TLS servers with dynamic certificate generation based on Server Name Indication (SNI).
+`hq-go-tls` is a [Go (Golang)](http://golang.org/) package for generating, managing, and signing X.509 certificates. It provides a robust API for creating self-signed Certificate Authority (CA) certificates, issuing TLS certificates for various host types, and configuring TLS servers with dynamic certificate generation based on Server Name Indication (SNI).
 
 ## Resource
 
