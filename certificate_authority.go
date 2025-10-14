@@ -273,7 +273,7 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 		},
 		GetCertificate: CA.getTLSCertificateFunc(),
 		MinVersion:     tls.VersionTLS12,
-		NextProtos:     []string{"http/1.1"},
+		NextProtos:     []string{"h2", "http/1.1", "h3"},
 	}
 
 	return
