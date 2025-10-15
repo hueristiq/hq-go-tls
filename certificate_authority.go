@@ -46,17 +46,6 @@ type _CACertificatePrivateKeyOptions struct {
 //   - opts (*_CACertificatePrivateKeyOptions): A pointer to _CACertificatePrivateKeyOptions to be modified.
 type CACertificatePrivateKeyOptionFunc func(opts *_CACertificatePrivateKeyOptions)
 
-// _CacheEntry represents a cached TLS certificate and its creation time.
-// This struct is used internally by CertificateAuthority to store dynamically generated certificates.
-//
-// Fields:
-//   - certificate (*tls.Certificate): The cached TLS certificate, including the certificate chain and private key.
-//   - createdAt (time.Time): The time when the certificate was created, used for cache expiration.
-type _CacheEntry struct {
-	certificate *tls.Certificate
-	createdAt   time.Time
-}
-
 // CertificateAuthority represents a Certificate Authority (CA) for generating and signing TLS certificates.
 // It encapsulates a CA certificate and its private key, providing methods to generate TLS configurations
 // and certificates dynamically based on Server Name Indication (SNI) hostnames. Certificates are cached
@@ -64,18 +53,38 @@ type _CacheEntry struct {
 //
 // Fields:
 //   - _CACertificate (*x509.Certificate): The X.509 CA certificate used to sign TLS certificates.
-//   - _CAPrivateKey (crypto.Signer): The private key corresponding to the CA certificate, implementing crypto.Signer.
-//   - cache (map[string]*_CacheEntry): A map storing cached TLS certificates, keyed by normalized hostname.
+//   - _CACertificatePrivateKey (crypto.Signer): The private key corresponding to the CA certificate, implementing crypto.Signer.
+//   - cache (map[string]*_TLSCertificateCacheEntry): A map storing cached TLS certificates, keyed by normalized hostname.
 //   - cacheMutex (sync.RWMutex): A mutex for thread-safe access to the cache.
 //   - cacheMaxAge (time.Duration): The maximum age of cached certificates before they expire (default: 1 hour).
 //   - cacheMaxSize (int): The maximum number of certificates to store in the cache (default: 5).
 type CertificateAuthority struct {
-	_CACertificate *x509.Certificate
-	_CAPrivateKey  crypto.Signer
-	cache          map[string]*_CacheEntry
-	cacheMutex     sync.RWMutex
-	cacheMaxAge    time.Duration
-	cacheMaxSize   int
+	_CACertificate           *x509.Certificate
+	_CACertificatePrivateKey crypto.Signer
+	cache                    map[string]*_TLSCertificateCacheEntry
+	cacheMutex               sync.RWMutex
+	cacheMaxAge              time.Duration
+	cacheMaxSize             int
+}
+
+// GetCACertificate returns the CA's X.509 certificate.
+//
+// Returns:
+//   - certificate (*x509.Certificate): The CA's X.509 certificate used for signing TLS certificates.
+func (CA *CertificateAuthority) GetCACertificate() (certificate *x509.Certificate) {
+	certificate = CA._CACertificate
+
+	return
+}
+
+// GetCACertificatePrivateKey returns the CA's private key.
+//
+// Returns:
+//   - key (crypto.Signer): The private key corresponding to the CA certificate, implementing crypto.Signer.
+func (CA *CertificateAuthority) GetCACertificatePrivateKey() (key crypto.Signer) {
+	key = CA._CACertificatePrivateKey
+
+	return
 }
 
 // GenerateTLSCertificate generates a new X.509 TLS certificate and its corresponding private key.
@@ -133,7 +142,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 		return
 	}
 
-	switch caKey := CA._CAPrivateKey.(type) {
+	switch caKey := CA._CACertificatePrivateKey.(type) {
 	case *rsa.PrivateKey:
 		TLSPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
@@ -196,6 +205,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 		NotAfter:     opts.ValidFrom.Add(opts.ValidFor),
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
+			CommonName:   opts.CommonName,
 			Organization: opts.Organization,
 		},
 		SubjectKeyId: TLSPrivateKeySKI,
@@ -221,7 +231,7 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	var TLSCertificateInBytes []byte
 
-	TLSCertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, CA._CACertificate, TLSPublicKey, CA._CAPrivateKey)
+	TLSCertificateInBytes, err = x509.CreateCertificate(rand.Reader, template, CA._CACertificate, TLSPublicKey, CA._CACertificatePrivateKey)
 	if err != nil {
 		err = fmt.Errorf("failed to create TLS certificate for hosts %v: %w", hosts, err)
 
@@ -240,132 +250,142 @@ func (CA *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 // NewTLSConfig creates a TLS configuration for use in a TLS server.
 //
-// The configuration includes a dynamic certificate generation function based on Server Name Indication (SNI)
-// and sets a minimum TLS version of TLS 1.2. It specifies supported cipher suites, curve preferences, and
-// Application-Layer Protocol Negotiation (ALPN) protocols, including HTTP/1.0, HTTP/1.1, and HTTP/2.0.
-//
 // Returns:
 //   - cfg (*tls.Config): A pointer to a tls.Config with a dynamic certificate generation function.
 func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
-	cfg = &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
-
 	if CA == nil {
 		return
 	}
 
 	cfg = &tls.Config{
-		CipherSuites: []uint16{
-			tls.TLS_AES_128_GCM_SHA256,
-			tls.TLS_AES_256_GCM_SHA384,
-			tls.TLS_CHACHA20_POLY1305_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+		GetCertificate: func(hello *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
+			if hello == nil {
+				err = errors.New("invalid input, ClientHelloInfo is nil")
+
+				return
+			}
+
+			host := hello.ServerName
+
+			if host == "" {
+				err = errors.New("invalid input, missing server name (SNI)")
+
+				return
+			}
+
+			return CA.getTLSCertificate(host)
 		},
-		CurvePreferences: []tls.CurveID{
-			tls.X25519,
-			tls.CurveP256,
-		},
-		GetCertificate: CA.getTLSCertificateFunc(),
-		MinVersion:     tls.VersionTLS12,
-		NextProtos:     []string{"h2", "http/1.1", "h3"},
+		NextProtos: []string{"http/1.1"},
 	}
 
 	return
 }
 
-// getTLSCertificateFunc returns a function to generate TLS certificates based on SNI.
+// NewTLSConfigWithHost creates a TLS configuration for a specific hostname.
 //
-// The returned function is used as the GetCertificate callback in a tls.Config. It generates or retrieves a cached
-// TLS certificate for the provided server name (from SNI) with a short validity period (24 hours). Certificates are
-// cached to improve performance, with expiration based on cacheMaxAge.
+// Similar to NewTLSConfig, but allows specifying a default hostname to use when SNI is not provided.
+//
+// Parameters:
+//   - hostname (string): The default hostname to use if SNI is not provided.
 //
 // Returns:
-//   - (func(*tls.ClientHelloInfo) (*tls.Certificate, error)): A function that takes a tls.ClientHelloInfo and returns a tls.Certificate and an error.
-//     The error includes stack trace and metadata if certificate generation fails or SNI is missing.
-func (CA *CertificateAuthority) getTLSCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return func(hello *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
-		if hello == nil {
-			err = errors.New("invalid input, ClientHelloInfo is nil")
+//   - cfg (*tls.Config): A pointer to a tls.Config with a dynamic certificate generation function.
+func (CA *CertificateAuthority) NewTLSConfigWithHost(hostname string) (cfg *tls.Config) {
+	if CA == nil {
+		return
+	}
 
-			return
-		}
-
-		if hello.ServerName == "" {
-			err = errors.New("invalid input, missing server name (SNI)")
-
-			return
-		}
-
-		host := normalizeHost(hello.ServerName)
-
-		CA.cacheMutex.RLock()
-
-		if entry, exists := CA.cache[host]; exists {
-			if time.Since(entry.createdAt) < CA.cacheMaxAge {
-				certificate = entry.certificate
-
-				CA.cacheMutex.RUnlock()
-
-				return
+	cfg = &tls.Config{
+		GetCertificate: func(hello *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
+			host := hello.ServerName
+			if host == "" {
+				host = hostname
 			}
 
+			return CA.getTLSCertificate(host)
+		},
+		NextProtos: []string{"http/1.1"},
+	}
+
+	return
+}
+
+// getTLSCertificate retrieves or generates a TLS certificate for the given hostname.
+//
+// This internal method checks the cache for an existing certificate for the normalized hostname.
+// If a valid cached certificate exists (not expired), it is returned. Otherwise, a new certificate is generated
+// with a 24-hour validity period and stored in the cache. The cache is managed to respect the maximum size limit.
+//
+// Parameters:
+//   - hostname (string): The hostname (e.g., "example.com") for which to retrieve or generate a certificate.
+//
+// Returns:
+//   - certificate (*tls.Certificate): The TLS certificate, including the certificate chain and private key.
+//   - err (error): An error with stack trace and metadata if certificate generation fails; otherwise, nil.
+func (CA *CertificateAuthority) getTLSCertificate(hostname string) (certificate *tls.Certificate, err error) {
+	host := normalizeHost(hostname)
+
+	CA.cacheMutex.RLock()
+
+	if entry, exists := CA.cache[host]; exists {
+		if time.Since(entry.createdAt) < CA.cacheMaxAge {
+			certificate = entry.certificate
+
 			CA.cacheMutex.RUnlock()
-			CA.cacheMutex.Lock()
-
-			delete(CA.cache, host)
-
-			CA.cacheMutex.Unlock()
 
 			return
-		} else {
-			CA.cacheMutex.RUnlock()
 		}
 
-		var TLSCertificate *x509.Certificate
-
-		var TLSPrivateKey crypto.Signer
-
-		TLSCertificate, TLSPrivateKey, err = CA.GenerateTLSCertificate([]string{host}, TLSCertificatePrivateKeyWithValidFor(24*time.Hour))
-		if err != nil {
-			err = fmt.Errorf("failed to generate TLS certificate for host '%s': %w", host, err)
-
-			return
-		}
-
-		certificate = &tls.Certificate{
-			Certificate: [][]byte{
-				TLSCertificate.Raw,
-				CA._CACertificate.Raw,
-			},
-			PrivateKey: TLSPrivateKey,
-			Leaf:       TLSCertificate,
-		}
-
+		CA.cacheMutex.RUnlock()
 		CA.cacheMutex.Lock()
 
-		defer CA.cacheMutex.Unlock()
+		delete(CA.cache, host)
 
-		if CA.cache == nil {
-			CA.cache = make(map[string]*_CacheEntry)
-		}
+		CA.cacheMutex.Unlock()
 
-		if len(CA.cache) >= CA.cacheMaxSize {
-			CA.clearOldCacheEntries()
-		}
+		return
+	} else {
+		CA.cacheMutex.RUnlock()
+	}
 
-		CA.cache[host] = &_CacheEntry{
-			certificate: certificate,
-			createdAt:   time.Now(),
-		}
+	var TLSCertificate *x509.Certificate
+
+	var TLSPrivateKey crypto.Signer
+
+	TLSCertificate, TLSPrivateKey, err = CA.GenerateTLSCertificate([]string{host}, TLSCertificatePrivateKeyWithValidFor(24*time.Hour))
+	if err != nil {
+		err = fmt.Errorf("failed to generate TLS certificate for host '%s': %w", host, err)
 
 		return
 	}
+
+	certificate = &tls.Certificate{
+		Certificate: [][]byte{
+			TLSCertificate.Raw,
+			CA._CACertificate.Raw,
+		},
+		PrivateKey: TLSPrivateKey,
+		Leaf:       TLSCertificate,
+	}
+
+	CA.cacheMutex.Lock()
+
+	defer CA.cacheMutex.Unlock()
+
+	if CA.cache == nil {
+		CA.cache = make(map[string]*_TLSCertificateCacheEntry)
+	}
+
+	if len(CA.cache) >= CA.cacheMaxSize {
+		CA.clearOldCacheEntries()
+	}
+
+	CA.cache[host] = &_TLSCertificateCacheEntry{
+		certificate: certificate,
+		createdAt:   time.Now(),
+	}
+
+	return
 }
 
 // clearOldCacheEntries removes the oldest certificate from the cache to make room for new entries.
@@ -387,6 +407,17 @@ func (CA *CertificateAuthority) clearOldCacheEntries() {
 	if oldestKey != "" {
 		delete(CA.cache, oldestKey)
 	}
+}
+
+// _TLSCertificateCacheEntry represents a cached TLS certificate and its creation time.
+// This struct is used internally by CertificateAuthority to store dynamically generated certificates.
+//
+// Fields:
+//   - certificate (*tls.Certificate): The cached TLS certificate, including the certificate chain and private key.
+//   - createdAt (time.Time): The time when the certificate was created, used for cache expiration.
+type _TLSCertificateCacheEntry struct {
+	certificate *tls.Certificate
+	createdAt   time.Time
 }
 
 // _TLSCertificatePrivateKeyOptions defines configuration options for generating a TLS certificate and private key pair.
@@ -771,7 +802,7 @@ func TLSCertificatePrivateKeyWithValidFor(validFor time.Duration) TLSCertificate
 //
 // It verifies that the certificate is configured as a CA and has the necessary key usage for certificate
 // signing. The private key must match the public key type in the certificate (RSA, ECDSA, or Ed25519).
-// The cache is initialized with a default maximum age of 1 hour.
+// The cache is initialized with a default maximum age of 1 hour and maximum size of 5 entries.
 //
 // Parameters:
 //   - CACertificate (*x509.Certificate): A pointer to the X.509 CA certificate.
@@ -831,12 +862,12 @@ func New(CACertificate *x509.Certificate, CAPrivateKey crypto.Signer) (CA *Certi
 	}
 
 	CA = &CertificateAuthority{
-		_CACertificate: CACertificate,
-		_CAPrivateKey:  CAPrivateKey,
-		cache:          make(map[string]*_CacheEntry),
-		cacheMutex:     sync.RWMutex{},
-		cacheMaxAge:    1 * time.Hour,
-		cacheMaxSize:   5,
+		_CACertificate:           CACertificate,
+		_CACertificatePrivateKey: CAPrivateKey,
+		cache:                    make(map[string]*_TLSCertificateCacheEntry),
+		cacheMutex:               sync.RWMutex{},
+		cacheMaxAge:              1 * time.Hour,
+		cacheMaxSize:             5,
 	}
 
 	return
