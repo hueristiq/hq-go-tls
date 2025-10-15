@@ -275,7 +275,6 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 
 			return CA.getTLSCertificate(host)
 		},
-		InsecureSkipVerify: true,
 		NextProtos:         []string{"http/1.1"},
 	}
 
@@ -305,7 +304,6 @@ func (CA *CertificateAuthority) NewTLSConfigWithHost(hostname string) (cfg *tls.
 
 			return CA.getTLSCertificate(host)
 		},
-		InsecureSkipVerify: true,
 		NextProtos:         []string{"http/1.1"},
 	}
 
