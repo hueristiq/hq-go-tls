@@ -275,7 +275,7 @@ func (CA *CertificateAuthority) NewTLSConfig() (cfg *tls.Config) {
 
 			return CA.getTLSCertificate(host)
 		},
-		NextProtos:         []string{"http/1.1"},
+		NextProtos: []string{"http/1.1"},
 	}
 
 	return
@@ -304,7 +304,7 @@ func (CA *CertificateAuthority) NewTLSConfigWithHost(hostname string) (cfg *tls.
 
 			return CA.getTLSCertificate(host)
 		},
-		NextProtos:         []string{"http/1.1"},
+		NextProtos: []string{"http/1.1"},
 	}
 
 	return
