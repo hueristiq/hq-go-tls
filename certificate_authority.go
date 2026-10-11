@@ -365,8 +365,9 @@ func WithTLSOrganization(organization []string) (of TLSOption) {
 // WithTLSValidFrom sets the start time for the TLS certificate's validity period.
 //
 // The default is the current time. The certificate's NotBefore is backdated by
-// 5 minutes from this time to tolerate clock skew, and its NotAfter is clamped
-// to the CA's expiry.
+// 5 minutes from this time to tolerate clock skew, its NotAfter is clamped
+// to the CA's expiry, and a validity start at or after the CA's expiry is
+// rejected.
 //
 // Parameters:
 //   - validFrom (time.Time): The time from which the certificate is valid (e.g., time.Now()).
@@ -426,7 +427,8 @@ func WithTLSExtKeyUsage(usages ...x509.ExtKeyUsage) (of TLSOption) {
 // identifier (SKI); its key usage is digital signature, plus key encipherment for RSA keys only. Hostnames are parsed to
 // determine if they represent IP addresses, email addresses, URIs, or DNS names, and are added to the appropriate certificate
 // fields; non-ASCII DNS names are converted to their A-label (punycode) form, since a DNS SAN must be ASCII. The certificate's
-// CommonName defaults to the first host, and its expiry is clamped to the CA's expiry so a leaf never outlives its CA.
+// CommonName defaults to the first host, and its expiry is clamped to the CA's expiry so a leaf never outlives its CA; a
+// requested validity that starts at or after the CA's expiry is rejected.
 //
 // By default the Common Name is the first host, the Organization is empty, the
 // extended key usages are derived from the SAN kinds present (see
@@ -553,9 +555,20 @@ func (ca *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 
 	// Clamp the leaf's expiry to the CA's expiry so an issued certificate never
 	// outlives the authority that signed it.
+	notBefore := opts.ValidFrom.Add(-5 * time.Minute)
 	notAfter := opts.ValidFrom.Add(opts.ValidFor)
+
 	if notAfter.After(ca.caCertificate.NotAfter) {
 		notAfter = ca.caCertificate.NotAfter
+	}
+
+	// A requested validity that starts at or after the CA's expiry cannot be
+	// clamped into a usable window: the certificate would expire before it
+	// became valid. Reject it instead of issuing an unusable certificate.
+	if !notAfter.After(notBefore) {
+		err = fmt.Errorf("tls.GenerateTLSCertificate: invalid input, validity period is empty or negative after clamping to the CA's expiry (ValidFrom: %v, CA expiry: %v)", opts.ValidFrom, ca.caCertificate.NotAfter)
+
+		return nil, nil, err
 	}
 
 	template := &x509.Certificate{
@@ -563,7 +576,7 @@ func (ca *CertificateAuthority) GenerateTLSCertificate(hosts []string, ofs ...TL
 		KeyUsage:              keyUsage,
 		// Backdate NotBefore by 5 minutes to tolerate modest clock skew between
 		// this host and verifying clients.
-		NotBefore:    opts.ValidFrom.Add(-5 * time.Minute),
+		NotBefore:    notBefore,
 		NotAfter:     notAfter,
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
@@ -673,7 +686,8 @@ func (ca *CertificateAuthority) TLSCertificate(hostname string) (certificate *tl
 // digital signature, plus key encipherment when the CSR's public key is RSA.
 // When no EKU options are supplied, the certificate defaults to client
 // authentication ([x509.ExtKeyUsageClientAuth]). The certificate's expiry is
-// clamped to the CA's expiry so a signed certificate never outlives its CA.
+// clamped to the CA's expiry so a signed certificate never outlives its CA; a
+// requested validity that starts at or after the CA's expiry is rejected.
 //
 // The CSR's signature is verified before signing. The Common Name and
 // Organization default to the CSR's subject values and can be overridden with
@@ -757,9 +771,20 @@ func (ca *CertificateAuthority) SignCSR(csr *x509.CertificateRequest, ofs ...TLS
 
 	// Clamp the certificate's expiry to the CA's expiry so a signed certificate
 	// never outlives the authority that signed it.
+	notBefore := opts.ValidFrom.Add(-5 * time.Minute)
 	notAfter := opts.ValidFrom.Add(opts.ValidFor)
+
 	if notAfter.After(ca.caCertificate.NotAfter) {
 		notAfter = ca.caCertificate.NotAfter
+	}
+
+	// A requested validity that starts at or after the CA's expiry cannot be
+	// clamped into a usable window: the certificate would expire before it
+	// became valid. Reject it instead of signing an unusable certificate.
+	if !notAfter.After(notBefore) {
+		err = fmt.Errorf("tls.SignCSR: invalid input, validity period is empty or negative after clamping to the CA's expiry (ValidFrom: %v, CA expiry: %v)", opts.ValidFrom, ca.caCertificate.NotAfter)
+
+		return nil, err
 	}
 
 	// Key encipherment is only meaningful for RSA keys (RSA key exchange in
@@ -778,7 +803,7 @@ func (ca *CertificateAuthority) SignCSR(csr *x509.CertificateRequest, ofs ...TLS
 		ExtKeyUsage:           extKeyUsage,
 		IPAddresses:           csr.IPAddresses,
 		KeyUsage:              keyUsage,
-		NotBefore:             opts.ValidFrom.Add(-5 * time.Minute),
+		NotBefore:             notBefore,
 		NotAfter:              notAfter,
 		SerialNumber:          serialNumber,
 		Subject: pkix.Name{
@@ -812,6 +837,7 @@ func (ca *CertificateAuthority) SignCSR(csr *x509.CertificateRequest, ofs ...TLS
 
 // TLSConfigOption is a function type used to configure the tls.Config produced by
 // [CertificateAuthority.NewTLSConfig] and [CertificateAuthority.NewTLSConfigWithHost].
+// Options are applied in order, so later options override earlier ones.
 //
 // Parameters:
 //   - cfg (*tls.Config): A pointer to the tls.Config to be modified.
@@ -1120,8 +1146,9 @@ func (ca *CertificateAuthority) generateAndCacheTLSCertificate(host string) (cer
 	return certificate, nil
 }
 
-// isCacheEntryValid reports whether a cached certificate may still be served: it must be younger
-// than the configured maximum age and the certificate itself must not have expired.
+// isCacheEntryValid reports whether a cached certificate may still be served: the entry must have
+// been stored in the past (a future CreatedAt is never fresh), be younger than the configured
+// maximum age, and the certificate itself must not have expired.
 //
 // Parameters:
 //   - entry (*hqgotlscache.CertificateCacheEntry): The cache entry to validate.
@@ -1134,8 +1161,9 @@ func (ca *CertificateAuthority) isCacheEntryValid(entry *hqgotlscache.Certificat
 	}
 
 	now := time.Now()
+	age := now.Sub(entry.CreatedAt)
 
-	return now.Sub(entry.CreatedAt) < ca.cacheMaxAge && now.Before(entry.Certificate.Leaf.NotAfter)
+	return age >= 0 && age < ca.cacheMaxAge && now.Before(entry.Certificate.Leaf.NotAfter)
 }
 
 // inflightCall tracks an in-progress certificate generation for a single hostname so that

@@ -359,6 +359,29 @@ func TestWriteToFile(t *testing.T) {
 		require.ErrorContains(t, err, "content to write")
 	})
 
+	t.Run("refuses symlink target", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink creation requires elevated privileges on Windows")
+		}
+
+		dir := t.TempDir()
+
+		target := filepath.Join(dir, "target")
+		require.NoError(t, os.WriteFile(target, []byte("precious"), 0o600))
+
+		link := filepath.Join(dir, "link")
+		require.NoError(t, os.Symlink(target, link))
+
+		err := writeToFile([]byte("replacement"), link, 0o600)
+		require.ErrorContains(t, err, "symlink")
+
+		content, readErr := os.ReadFile(target) //nolint:gosec // G304: test-controlled path under t.TempDir()
+		require.NoError(t, readErr)
+		assert.Equal(t, []byte("precious"), content)
+	})
+
 	t.Run("missing parent directory", func(t *testing.T) {
 		t.Parallel()
 
@@ -375,19 +398,35 @@ func TestSaveCertificatePrivateKeyToFilesPEMConversionErrors(t *testing.T) {
 	t.Run("certificate has no raw data", func(t *testing.T) {
 		t.Parallel()
 
+		dir := t.TempDir()
+
+		certificateFilePath := filepath.Join(dir, "ca.crt")
+		privateKeyFilePath := filepath.Join(dir, "ca.key")
+
 		certificate := &x509.Certificate{PublicKey: caCertificate.PublicKey}
 
-		err := SaveCertificatePrivateKeyToFiles(certificate, caPrivateKey, filepath.Join(t.TempDir(), "ca.crt"), filepath.Join(t.TempDir(), "ca.key"))
+		err := SaveCertificatePrivateKeyToFiles(certificate, caPrivateKey, certificateFilePath, privateKeyFilePath)
 		require.ErrorContains(t, err, "converting certificate to PEM format")
+
+		_, statErr := os.Stat(privateKeyFilePath)
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
 	})
 
 	t.Run("private key type unsupported for PEM encoding", func(t *testing.T) {
 		t.Parallel()
 
+		dir := t.TempDir()
+
+		certificateFilePath := filepath.Join(dir, "ca.crt")
+		privateKeyFilePath := filepath.Join(dir, "ca.key")
+
 		privateKey := publicKeySigner{publicKey: caCertificate.PublicKey}
 
-		err := SaveCertificatePrivateKeyToFiles(caCertificate, privateKey, filepath.Join(t.TempDir(), "ca.crt"), filepath.Join(t.TempDir(), "ca.key"))
+		err := SaveCertificatePrivateKeyToFiles(caCertificate, privateKey, certificateFilePath, privateKeyFilePath)
 		require.ErrorContains(t, err, "converting private key to PEM format")
+
+		_, statErr := os.Stat(certificateFilePath)
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
 	})
 }
 

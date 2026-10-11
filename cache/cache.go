@@ -26,6 +26,9 @@ type CertificateCacheEntry struct {
 // served (maximum age and leaf expiry), so implementations cannot get certificate
 // validity wrong. Get runs on every TLS handshake and must be cheap.
 //
+// Callers must not mutate entries returned by Get: implementations hand out their
+// stored entries, and the authority relies on their contents.
+//
 // Methods:
 //   - Get returns the entry stored for host, or found = false when none is stored.
 //   - Set stores entry for host, replacing any existing entry; implementations may

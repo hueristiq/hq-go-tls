@@ -943,19 +943,19 @@ func TestGenerateTLSCertificateValidation(t *testing.T) {
 	ca := newTestAuthority(t)
 
 	unsupportedKeyAuthority := &CertificateAuthority{
-		caCertificate:           &x509.Certificate{},
+		caCertificate:           &x509.Certificate{NotAfter: time.Now().Add(time.Hour)},
 		caCertificatePrivateKey: fakeSigner{},
 	}
 
 	tinyRSAKeyAuthority := &CertificateAuthority{
-		caCertificate: &x509.Certificate{},
+		caCertificate: &x509.Certificate{NotAfter: time.Now().Add(time.Hour)},
 		caCertificatePrivateKey: &rsa.PrivateKey{
 			PublicKey: rsa.PublicKey{N: big.NewInt(143), E: 3},
 		},
 	}
 
 	nilCurveAuthority := &CertificateAuthority{
-		caCertificate: &x509.Certificate{},
+		caCertificate: &x509.Certificate{NotAfter: time.Now().Add(time.Hour)},
 		caCertificatePrivateKey: &ecdsa.PrivateKey{
 			PublicKey: ecdsa.PublicKey{X: big.NewInt(1), Y: big.NewInt(1)},
 			D:         big.NewInt(1),
@@ -1205,6 +1205,21 @@ func TestGenerateTLSCertificateClampsValidityToCAExpiry(t *testing.T) {
 	assert.True(t, certificate.NotAfter.Equal(caCertificate.NotAfter))
 }
 
+func TestGenerateTLSCertificateRejectsValidityStartingAfterCAExpiry(t *testing.T) {
+	t.Parallel()
+
+	caCertificate, caPrivateKey := newTestCACertificatePrivateKey(t, WithCAValidFor(time.Hour))
+
+	ca, err := New(caCertificate, caPrivateKey)
+	require.NoError(t, err)
+
+	_, _, err = ca.GenerateTLSCertificate(
+		[]string{"example.com"},
+		WithTLSValidFrom(time.Now().Add(2*time.Hour)),
+	)
+	require.ErrorContains(t, err, "validity period is empty or negative after clamping to the CA's expiry")
+}
+
 func TestSignCSRValidation(t *testing.T) {
 	t.Parallel()
 
@@ -1335,6 +1350,20 @@ func TestSignCSRClampsValidityToCAExpiry(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, certificate.NotAfter.Equal(caCertificate.NotAfter))
+}
+
+func TestSignCSRRejectsValidityStartingAfterCAExpiry(t *testing.T) {
+	t.Parallel()
+
+	caCertificate, caPrivateKey := newTestCACertificatePrivateKey(t, WithCAValidFor(time.Hour))
+
+	ca, err := New(caCertificate, caPrivateKey)
+	require.NoError(t, err)
+
+	csr := newTestCSR(t, "client.example.com", nil)
+
+	_, err = ca.SignCSR(csr, WithTLSValidFrom(time.Now().Add(2*time.Hour)))
+	require.ErrorContains(t, err, "validity period is empty or negative after clamping to the CA's expiry")
 }
 
 type fakeSigner struct{}
@@ -1713,6 +1742,7 @@ func TestIsCacheEntryValid(t *testing.T) {
 		{"nil certificate", &hqgotlscache.CertificateCacheEntry{Certificate: nil, CreatedAt: now}, false},
 		{"nil leaf", &hqgotlscache.CertificateCacheEntry{Certificate: &tls.Certificate{}, CreatedAt: now}, false},
 		{"fresh entry", &hqgotlscache.CertificateCacheEntry{Certificate: &tls.Certificate{Leaf: &x509.Certificate{NotAfter: now.Add(time.Hour)}}, CreatedAt: now}, true},
+		{"entry created in the future", &hqgotlscache.CertificateCacheEntry{Certificate: &tls.Certificate{Leaf: &x509.Certificate{NotAfter: now.Add(2 * time.Hour)}}, CreatedAt: now.Add(time.Hour)}, false},
 		{"entry older than max age", &hqgotlscache.CertificateCacheEntry{Certificate: &tls.Certificate{Leaf: &x509.Certificate{NotAfter: now.Add(time.Hour)}}, CreatedAt: now.Add(-2 * time.Hour)}, false},
 		{"expired leaf", &hqgotlscache.CertificateCacheEntry{Certificate: &tls.Certificate{Leaf: &x509.Certificate{NotAfter: now.Add(-time.Hour)}}, CreatedAt: now}, false},
 	}
@@ -1802,9 +1832,11 @@ func TestGetTLSCertificateLeaderPanicUnblocksWaiters(t *testing.T) {
 
 	// An Ed25519 private key with a bad length panics inside
 	// x509.CreateCertificate (its Public method reads priv[32:]), forcing the
-	// leader down the panic path without crashing the test process.
+	// leader down the panic path without crashing the test process. The CA
+	// certificate needs a future NotAfter so issuance reaches that point
+	// instead of failing the validity clamp.
 	ca := &CertificateAuthority{
-		caCertificate:           &x509.Certificate{},
+		caCertificate:           &x509.Certificate{NotAfter: time.Now().Add(time.Hour)},
 		caCertificatePrivateKey: ed25519.PrivateKey{0x01, 0x02},
 	}
 

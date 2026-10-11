@@ -64,6 +64,27 @@ func TestInMemoryGetMissOnUnknownHost(t *testing.T) {
 	assert.Nil(t, entry)
 }
 
+func TestInMemorySetNilEntryPanics(t *testing.T) {
+	t.Parallel()
+
+	c, err := NewInMemory(1)
+	require.NoError(t, err)
+
+	require.PanicsWithValue(t, "cache.InMemory.Set: invalid input, entry is nil", func() {
+		c.Set("example.com", nil)
+	})
+}
+
+func TestEvictionHeapPushRejectsWrongType(t *testing.T) {
+	t.Parallel()
+
+	var h evictionHeap
+
+	require.PanicsWithValue(t, "cache.evictionHeap.Push: invalid input, expected *heapEntry, got string", func() {
+		h.Push("not a heap entry")
+	})
+}
+
 func TestInMemoryEvictsOldestEntryWhenFull(t *testing.T) {
 	t.Parallel()
 
