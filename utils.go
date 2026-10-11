@@ -73,7 +73,8 @@ func LoadCertificatePrivateKeyFromFiles(certificateFilePath, certificatePrivateK
 // SaveCertificatePrivateKeyToFiles saves a certificate and its private key to the specified files in PEM format.
 //
 // The private key is verified to match the certificate's public key before anything is written.
-// The certificate and private key are converted to PEM format and written to the provided file paths.
+// The certificate and private key are converted to PEM format and written to the provided file paths;
+// both conversions happen before any file is written, so a conversion failure leaves no partial output.
 // The directories for both files are created with permissions 0755 if they do not exist. The certificate
 // file is written with permissions 0600 and the private key file with permissions 0400 (read-only) to
 // protect sensitive data. The private key must implement the crypto.Signer interface and be one of the
@@ -150,15 +151,15 @@ func SaveCertificatePrivateKeyToFiles(certificate *x509.Certificate, privateKey 
 		return err
 	}
 
-	if err = writeToFile(certificateBytes, certificateFilePath, 0o600); err != nil {
-		err = fmt.Errorf("tls.SaveCertificatePrivateKeyToFiles: writing certificate to file %q: %w", certificateFilePath, err)
+	keyBytes, err := PrivateKeyToPEM(privateKey)
+	if err != nil {
+		err = fmt.Errorf("tls.SaveCertificatePrivateKeyToFiles: converting private key to PEM format (type %T): %w", privateKey, err)
 
 		return err
 	}
 
-	keyBytes, err := PrivateKeyToPEM(privateKey)
-	if err != nil {
-		err = fmt.Errorf("tls.SaveCertificatePrivateKeyToFiles: converting private key to PEM format (type %T): %w", privateKey, err)
+	if err = writeToFile(certificateBytes, certificateFilePath, 0o600); err != nil {
+		err = fmt.Errorf("tls.SaveCertificatePrivateKeyToFiles: writing certificate to file %q: %w", certificateFilePath, err)
 
 		return err
 	}
@@ -206,6 +207,9 @@ func mkdir(path string) (err error) {
 // permissions is tightened as well; a pre-existing read-only file (for example a private key
 // written 0400 by an earlier call) is first made owner-writable so the write succeeds.
 //
+// A path that resolves to a symlink is refused: chmod and the write would follow the link and
+// modify the link's target instead of the named path.
+//
 // On Windows, permission bits are not honored beyond the read-only attribute.
 //
 // Parameters:
@@ -214,7 +218,7 @@ func mkdir(path string) (err error) {
 //   - perm (os.FileMode): The permissions the file must have after writing.
 //
 // Returns:
-//   - err (error): An error if file writing or permission setting fails; otherwise, nil.
+//   - err (error): An error if the path is a symlink or file writing or permission setting fails; otherwise, nil.
 func writeToFile(content []byte, path string, perm os.FileMode) (err error) {
 	if path == "" {
 		err = errors.New("tls.writeToFile: invalid input, file path is empty")
@@ -224,6 +228,21 @@ func writeToFile(content []byte, path string, perm os.FileMode) (err error) {
 
 	if len(content) == 0 {
 		err = fmt.Errorf("tls.writeToFile: invalid input, content to write to file %q is empty", path)
+
+		return err
+	}
+
+	// chmod and the write below follow symlinks, so a path that resolves to one
+	// would silently redirect the write onto the link's target. Refuse it up
+	// front.
+	if info, statErr := os.Lstat(path); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			err = fmt.Errorf("tls.writeToFile: refusing to write through symlink %q", path)
+
+			return err
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		err = fmt.Errorf("tls.writeToFile: inspecting file %q before writing: %w", path, statErr)
 
 		return err
 	}

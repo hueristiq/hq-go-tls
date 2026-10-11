@@ -57,6 +57,8 @@ func NewInMemory(maxSize int) (cache *InMemory, err error) {
 
 // Get returns the entry stored for the given host.
 //
+// The returned entry is the cache's stored entry and must not be mutated.
+//
 // Parameters:
 //   - host (string): The normalized hostname to look up.
 //
@@ -77,6 +79,8 @@ func (c *InMemory) Get(host string) (entry *CertificateCacheEntry, found bool) {
 
 // Set stores an entry for the given host, replacing any existing entry.
 //
+// Set panics if entry is nil.
+//
 // When the cache is full and the host is new, the entry with the earliest
 // CreatedAt is evicted first. Storing an existing host never triggers eviction.
 // Eviction pops the root of the byAge min-heap, so a full-cache Set is O(log n);
@@ -86,6 +90,10 @@ func (c *InMemory) Get(host string) (entry *CertificateCacheEntry, found bool) {
 //   - host (string): The normalized hostname to store the entry under.
 //   - entry (*CertificateCacheEntry): The entry to store.
 func (c *InMemory) Set(host string, entry *CertificateCacheEntry) {
+	if entry == nil {
+		panic("cache.InMemory.Set: invalid input, entry is nil")
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -166,12 +174,14 @@ func (h evictionHeap) Swap(i, j int) {
 
 // Push appends an entry to the heap.
 //
+// It panics if item is not a *heapEntry.
+//
 // Parameters:
 //   - item (any): The *heapEntry to append; the heap only ever holds *heapEntry values.
 func (h *evictionHeap) Push(item any) {
 	stored, ok := item.(*heapEntry)
 	if !ok {
-		return
+		panic(fmt.Sprintf("cache.evictionHeap.Push: invalid input, expected *heapEntry, got %T", item))
 	}
 
 	stored.index = len(*h)

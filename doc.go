@@ -30,7 +30,7 @@
 // The certificate cache is off by default: an authority created without
 // [WithCache] regenerates a certificate on every request. Enable caching with
 // [WithCache], passing a cache sized to the number of distinct hosts served
-// (NewInMemory in the cache subpackage is the ready-made implementation), and
+// ([cache.NewInMemory] is the ready-made implementation), and
 // set [WithCacheMaxAge] well below the leaf validity. For dynamic per-host
 // issuance, consider [WithCAKeyType] with [KeyTypeECDSAP256]: ECDSA-P256 leaf
 // generation is markedly faster than RSA-2048.
@@ -75,9 +75,13 @@
 //
 // Certificates follow RFC 5280 — random 128-bit serial numbers and SHA-256
 // subject key identifiers — and are PEM-encoded per RFC 7468. Leaf certificates
-// are clamped to the CA's expiry so they never outlive their issuer. TLS configs
+// are clamped to the CA's expiry so they never outlive their issuer, and
+// issuance fails when the requested validity starts at or after the CA's
+// expiry. TLS configs
 // produced by the authority require TLS 1.2 or higher and, by default, advertise
 // the HTTP/2 and HTTP/1.1 ALPN protocols (overridable with
 // [WithNextProtos]). A [CertificateAuthority] is safe for concurrent
 // use by multiple goroutines.
+//
+// [cache.NewInMemory]: https://pkg.go.dev/github.com/hueristiq/hq-lib-tls-go/cache#NewInMemory
 package tls
