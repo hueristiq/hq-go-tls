@@ -46,7 +46,7 @@ Before submitting an issue, search our [issue tracker](https://github.com/hueris
 
 - Submit an Issue:
 
-Assuming no existing issue exists, please [open a new issue](https://github.com/hueristiq/hq-lib-tls-go/issues/new), ensure you include required information when submitting the issue to ensure we can quickly reproduce your issue. We may have additional questions and will communicate through the GitHub issue, so please respond back to our questions to help reproduce and resolve the issue as quickly as possible.
+Assuming no existing issues exist, please [open a new issue](https://github.com/hueristiq/hq-lib-tls-go/issues/new), ensure you include required information when submitting the issue to ensure we can quickly reproduce your issue. We may have additional questions and will communicate through the GitHub issue, so please respond back to our questions to help reproduce and resolve the issue as quickly as possible.
 
 ### Create a Pull Request
 
@@ -62,3 +62,10 @@ This package follows the shared code-style conventions of the hueristiq Go libra
 - **Interfaces.** A type that implements an interface declares a compile-time assertion (`var _ Iface = (*T)(nil)`).
 - **Naming.** MixedCaps with uniform-case initialisms (`URL`, `ID`, `TLS`); accessors are not prefixed with `Get`.
 - **Formatting.** Code is `gofmt`/`goimports` clean, with imports grouped standard library / external / `github.com/hueristiq`. Style is enforced mechanically by the repo-pinned `golangci-lint` configuration — run `make go-lint` before submitting.
+
+## Git Hooks
+
+Pre-commit checks (lint and tests) run via [lefthook](https://github.com/evilmartians/lefthook). Set them up in your clone with:
+
+    make install-golangci-lint install-lefthook
+    make lefthook-initialize
